@@ -1,0 +1,982 @@
+@page "/"
+@using RedisViewer.Services
+@using System.Text.Json
+@inject RedisService Redis
+@inject ISnackbar Snackbar
+@rendermode InteractiveServer
+@implements IDisposable
+
+<PageTitle>Redis Viewer</PageTitle>
+
+<MudThemeProvider Theme="_theme" IsDarkMode="_isDarkMode" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudAppBar Elevation="2" Fixed="true" Dense="true" Style="background: linear-gradient(90deg, #1a1a2e 0%, #16213e 100%);">
+    <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Medium" Class="mr-3" Style="color: #e94560;" />
+    <MudText Typo="Typo.h6" Style="font-weight: 600;">Redis Viewer</MudText>
+    <MudSpacer />
+
+    @if (Redis.IsConnected && _serverInfo != null)
+    {
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" Class="mx-1">
+            v@(_serverInfo.RedisVersion)
+        </MudChip>
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary" Class="mx-1">
+            @(_serverInfo.UsedMemory)
+        </MudChip>
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Class="mx-1">
+            @(_serverInfo.FormattedUptime) uptime
+        </MudChip>
+    }
+
+    <MudDivider Vertical="true" FlexItem="true" Class="mx-3" />
+
+    @if (Redis.IsConnected)
+    {
+        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">
+            @Redis.CurrentHost:@Redis.CurrentPort
+        </MudChip>
+        <MudIconButton Icon="@Icons.Material.Filled.LinkOff" Color="Color.Error" Size="Size.Small"
+                       OnClick="Disconnect" Class="ml-2" />
+    }
+    else
+    {
+        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">
+            Disconnected
+        </MudChip>
+    }
+
+    <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                   Color="Color.Inherit" OnClick="ToggleTheme" Class="ml-2" />
+</MudAppBar>
+
+<div style="padding-top: 48px; height: 100vh; overflow: hidden; background: var(--mud-palette-background);">
+    @if (Redis.IsConnected)
+    {
+        <div style="display: flex; flex-direction: column; height: 100%; padding: 16px; gap: 16px;">
+            @* Search Bar *@
+            <MudPaper Elevation="2" Class="pa-3" Style="border-radius: 12px;">
+                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                    <MudTextField @bind-Value="_searchPattern"
+                                  Label="Filter Pattern"
+                                  Placeholder="*, user:*, session:*"
+                                  Variant="Variant.Outlined"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Search"
+                                  Immediate="true"
+                                  DebounceInterval="500"
+                                  OnDebounceIntervalElapsed="OnPatternChanged"
+                                  Style="flex: 1; min-width: 250px;"
+                                  Margin="Margin.Dense" />
+
+                    <MudButtonGroup Variant="Variant.Filled" Size="Size.Small" OverrideStyles="false">
+                        <MudButton Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
+                                   OnClick="RefreshKeys" Disabled="_isStreaming">
+                            Refresh
+                        </MudButton>
+                        @if (_isStreaming)
+                        {
+                            <MudButton Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
+                                       OnClick="CancelStreaming">
+                                Stop
+                            </MudButton>
+                        }
+                    </MudButtonGroup>
+
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Key" Size="Size.Small" Color="Color.Primary" />
+                        <MudText Typo="Typo.body2">
+                            <strong>@_keys.Count.ToString("N0")</strong> keys
+                        </MudText>
+                        @if (_isStreaming)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Color="Color.Primary" />
+                        }
+                    </div>
+                </div>
+            </MudPaper>
+
+            @* Main Content *@
+            <div style="display: flex; flex: 1; gap: 16px; min-height: 0;">
+                @* Keys List with Tabs *@
+                <MudPaper Elevation="2" Style="width: 450px; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden;">
+                    @* Custom Tab Header *@
+                    <div style="display: flex; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                        <button @onclick="() => _activeTabIndex = 0"
+                                style="flex: 1; padding: 12px 8px; border: none; cursor: pointer; transition: all 0.2s;
+                                       background: @(_activeTabIndex == 0 ? "rgba(144, 202, 249, 0.2)" : "transparent");
+                                       border-bottom: 2px solid @(_activeTabIndex == 0 ? "#90caf9" : "transparent");
+                                       color: @(_activeTabIndex == 0 ? "#90caf9" : "inherit");">
+                            <MudIcon Icon="@Icons.Material.Filled.TextFields" Size="Size.Small" />
+                            <div style="font-size: 12px; margin-top: 4px;">Strings (@_stringKeys.Count.ToString("N0"))</div>
+                        </button>
+                        <button @onclick="() => _activeTabIndex = 1"
+                                style="flex: 1; padding: 12px 8px; border: none; cursor: pointer; transition: all 0.2s;
+                                       background: @(_activeTabIndex == 1 ? "rgba(244, 67, 54, 0.2)" : "transparent");
+                                       border-bottom: 2px solid @(_activeTabIndex == 1 ? "#f44336" : "transparent");
+                                       color: @(_activeTabIndex == 1 ? "#f44336" : "inherit");">
+                            <MudIcon Icon="@Icons.Material.Filled.Tag" Size="Size.Small" />
+                            <div style="font-size: 12px; margin-top: 4px;">Hashes (@_hashKeys.Count.ToString("N0"))</div>
+                        </button>
+                        <button @onclick="() => _activeTabIndex = 2"
+                                style="flex: 1; padding: 12px 8px; border: none; cursor: pointer; transition: all 0.2s;
+                                       background: @(_activeTabIndex == 2 ? "rgba(156, 39, 176, 0.2)" : "transparent");
+                                       border-bottom: 2px solid @(_activeTabIndex == 2 ? "#9c27b0" : "transparent");
+                                       color: @(_activeTabIndex == 2 ? "#9c27b0" : "inherit");">
+                            <MudIcon Icon="@Icons.Material.Filled.MoreHoriz" Size="Size.Small" />
+                            <div style="font-size: 12px; margin-top: 4px;">Other (@_otherKeys.Count.ToString("N0"))</div>
+                        </button>
+                    </div>
+
+                    @* Tab Content with Virtualization *@
+                    @if (_activeTabIndex == 0)
+                    {
+                        <div style="flex: 1; overflow-y: auto;">
+                            @if (!_stringKeys.Any() && !_isStreaming)
+                            {
+                                <div style="padding: 32px; text-align: center;">
+                                    <MudIcon Icon="@Icons.Material.Outlined.TextFields" Size="Size.Large" Color="Color.Secondary" />
+                                    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-2">No string keys found</MudText>
+                                </div>
+                            }
+                            else if (_isStreaming && !_stringKeys.Any())
+                            {
+                                <div style="padding: 32px; text-align: center;">
+                                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+                                    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-2">Loading...</MudText>
+                                </div>
+                            }
+                            else
+                            {
+                                <Virtualize Items="_stringKeys" Context="key" ItemSize="72" OverscanCount="3">
+                                    <div @onclick="() => SelectKey(key)"
+                                         style="padding: 12px 16px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.1); height: 72px; box-sizing: border-box;
+                                                background: @(_selectedKey?.Key == key.Key ? "rgba(144, 202, 249, 0.2)" : "transparent");
+                                                border-left: 3px solid @(_selectedKey?.Key == key.Key ? "#90caf9" : "transparent");"
+                                         class="key-item">
+                                        <div style="font-family: 'Consolas', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px;">
+                                            @key.Key
+                                        </div>
+                                        <div style="display: flex; gap: 6px; margin-top: 8px;">
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" Style="height: 20px; font-size: 10px;">String</MudChip>
+                                            @if (key.Size > 0)
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">@FormatSize(key.Size, key.Type)</MudChip>
+                                            }
+                                            @if (key.Ttl.HasValue)
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">TTL: @FormatTtl(key.Ttl.Value)</MudChip>
+                                            }
+                                        </div>
+                                    </div>
+                                </Virtualize>
+                            }
+                        </div>
+                    }
+                    else if (_activeTabIndex == 1)
+                    {
+                        <div style="flex: 1; overflow-y: auto;">
+                            @if (!_hashKeys.Any() && !_isStreaming)
+                            {
+                                <div style="padding: 32px; text-align: center;">
+                                    <MudIcon Icon="@Icons.Material.Outlined.Tag" Size="Size.Large" Color="Color.Secondary" />
+                                    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-2">No hash keys found</MudText>
+                                </div>
+                            }
+                            else if (_isStreaming && !_hashKeys.Any())
+                            {
+                                <div style="padding: 32px; text-align: center;">
+                                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+                                    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-2">Loading...</MudText>
+                                </div>
+                            }
+                            else
+                            {
+                                <Virtualize Items="_hashKeys" Context="key" ItemSize="72" OverscanCount="3">
+                                    <div @onclick="() => SelectKey(key)"
+                                         style="padding: 12px 16px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.1); height: 72px; box-sizing: border-box;
+                                                background: @(_selectedKey?.Key == key.Key ? "rgba(244, 67, 54, 0.2)" : "transparent");
+                                                border-left: 3px solid @(_selectedKey?.Key == key.Key ? "#f44336" : "transparent");"
+                                         class="key-item">
+                                        <div style="font-family: 'Consolas', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px;">
+                                            @key.Key
+                                        </div>
+                                        <div style="display: flex; gap: 6px; margin-top: 8px;">
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled" Style="height: 20px; font-size: 10px;">Hash</MudChip>
+                                            @if (key.Size > 0)
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">@FormatSize(key.Size, key.Type)</MudChip>
+                                            }
+                                            @if (key.Ttl.HasValue)
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">TTL: @FormatTtl(key.Ttl.Value)</MudChip>
+                                            }
+                                        </div>
+                                    </div>
+                                </Virtualize>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div style="flex: 1; overflow-y: auto;">
+                            @if (!_otherKeys.Any() && !_isStreaming)
+                            {
+                                <div style="padding: 32px; text-align: center;">
+                                    <MudIcon Icon="@Icons.Material.Outlined.MoreHoriz" Size="Size.Large" Color="Color.Secondary" />
+                                    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-2">No other keys found</MudText>
+                                </div>
+                            }
+                            else if (_isStreaming && !_otherKeys.Any())
+                            {
+                                <div style="padding: 32px; text-align: center;">
+                                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+                                    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-2">Loading...</MudText>
+                                </div>
+                            }
+                            else
+                            {
+                                <Virtualize Items="_otherKeys" Context="key" ItemSize="72" OverscanCount="3">
+                                    <div @onclick="() => SelectKey(key)"
+                                         style="padding: 12px 16px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.1); height: 72px; box-sizing: border-box;
+                                                background: @(_selectedKey?.Key == key.Key ? "rgba(156, 39, 176, 0.2)" : "transparent");
+                                                border-left: 3px solid @(_selectedKey?.Key == key.Key ? "#9c27b0" : "transparent");"
+                                         class="key-item">
+                                        <div style="font-family: 'Consolas', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px;">
+                                            @key.Key
+                                        </div>
+                                        <div style="display: flex; gap: 6px; margin-top: 8px;">
+                                            <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(key.Type)" Variant="Variant.Filled" Style="height: 20px; font-size: 10px;">@key.Type</MudChip>
+                                            @if (key.Size > 0)
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">@FormatSize(key.Size, key.Type)</MudChip>
+                                            }
+                                            @if (key.Ttl.HasValue)
+                                            {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">TTL: @FormatTtl(key.Ttl.Value)</MudChip>
+                                            }
+                                        </div>
+                                    </div>
+                                </Virtualize>
+                            }
+                        </div>
+                    }
+                </MudPaper>
+
+                @* Value Panel *@
+                <MudPaper Elevation="2" Style="flex: 1; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden; min-width: 0;">
+                    @if (_selectedKey != null)
+                    {
+                        <div style="padding: 12px 16px; background: var(--mud-palette-surface); border-bottom: 1px solid var(--mud-palette-divider); display: flex; align-items: center; gap: 12px;">
+                            <MudText Typo="Typo.subtitle1" Style="font-family: 'Consolas', monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                @_selectedKey.Key
+                            </MudText>
+                            <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(_selectedKey.Type)" Variant="Variant.Filled">
+                                @_selectedKey.Type
+                            </MudChip>
+                            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small"
+                                           OnClick="CopyValue" Color="Color.Primary" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                           OnClick="DeleteSelectedKey" Color="Color.Error" />
+                        </div>
+
+                        <div style="flex: 1; overflow: auto; padding: 16px;">
+                            @if (_isLoadingValue)
+                            {
+                                <div style="display: flex; justify-content: center; align-items: center; height: 100%;">
+                                    <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                                </div>
+                            }
+                            else if (_selectedValue != null)
+                            {
+                                @switch (_selectedValue.Type)
+                                {
+                                    case "String":
+                                        @if (_isEditingString)
+                                        {
+                                            <div style="display: flex; flex-direction: column; gap: 12px;">
+                                                <MudTextField @bind-Value="_editStringValue"
+                                                              Label="Value"
+                                                              Variant="Variant.Outlined"
+                                                              Lines="12"
+                                                              AutoGrow="true"
+                                                              Style="font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;" />
+                                                <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                                                    <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="CancelEditingString" Disabled="_isSavingString">
+                                                        Cancel
+                                                    </MudButton>
+                                                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveStringValue" Disabled="_isSavingString"
+                                                               StartIcon="@(_isSavingString ? null : Icons.Material.Filled.Save)">
+                                                        @if (_isSavingString)
+                                                        {
+                                                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                                                        }
+                                                        Save
+                                                    </MudButton>
+                                                </div>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div style="display: flex; justify-content: flex-end; margin-bottom: 8px; gap: 8px;">
+                                                @if (IsJson(_selectedValue.Value))
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">
+                                                        JSON
+                                                    </MudChip>
+                                                }
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                                                           StartIcon="@Icons.Material.Filled.Edit" OnClick="StartEditingString">
+                                                    Edit
+                                                </MudButton>
+                                            </div>
+                                            @if (IsJson(_selectedValue.Value))
+                                            {
+                                                <MudPaper Outlined="true" Class="pa-4" Style="background: #1e1e1e; border-radius: 8px; overflow: auto;">
+                                                    <pre style="margin: 0; white-space: pre; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.5;">@FormatJson(_selectedValue.Value)</pre>
+                                                </MudPaper>
+                                            }
+                                            else
+                                            {
+                                                <MudPaper Outlined="true" Class="pa-4" Style="background: var(--mud-palette-background-grey); border-radius: 8px;">
+                                                    <pre style="margin: 0; white-space: pre-wrap; word-break: break-all; font-family: 'Consolas', monospace; font-size: 14px;">@_selectedValue.Value</pre>
+                                                </MudPaper>
+                                            }
+                                        }
+                                        break;
+
+                                    case "List":
+                                        <MudSimpleTable Dense="true" Hover="true" Bordered="true" Style="border-radius: 8px; overflow: hidden;">
+                                            <thead>
+                                                <tr style="background: var(--mud-palette-primary);">
+                                                    <th style="width: 80px; color: white;">Index</th>
+                                                    <th style="color: white;">Value</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @for (int i = 0; i < _selectedValue.ListValue?.Count; i++)
+                                                {
+                                                    var index = i;
+                                                    <tr>
+                                                        <td><MudChip T="string" Size="Size.Small" Color="Color.Primary">@index</MudChip></td>
+                                                        <td style="font-family: 'Consolas', monospace;">@_selectedValue.ListValue[index]</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </MudSimpleTable>
+                                        break;
+
+                                    case "Set":
+                                        <MudSimpleTable Dense="true" Hover="true" Bordered="true" Style="border-radius: 8px; overflow: hidden;">
+                                            <thead>
+                                                <tr style="background: var(--mud-palette-info);">
+                                                    <th style="color: white;">Member</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var member in _selectedValue.SetValue ?? [])
+                                                {
+                                                    <tr>
+                                                        <td style="font-family: 'Consolas', monospace;">@member</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </MudSimpleTable>
+                                        break;
+
+                                    case "SortedSet":
+                                        <MudSimpleTable Dense="true" Hover="true" Bordered="true" Style="border-radius: 8px; overflow: hidden;">
+                                            <thead>
+                                                <tr style="background: var(--mud-palette-warning);">
+                                                    <th style="width: 120px; color: white;">Score</th>
+                                                    <th style="color: white;">Member</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var entry in _selectedValue.SortedSetValue ?? [])
+                                                {
+                                                    <tr>
+                                                        <td><MudChip T="string" Size="Size.Small" Color="Color.Warning">@entry.Score</MudChip></td>
+                                                        <td style="font-family: 'Consolas', monospace;">@entry.Member</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </MudSimpleTable>
+                                        break;
+
+                                    case "Hash":
+                                        <MudSimpleTable Dense="true" Hover="true" Bordered="true" Style="border-radius: 8px; overflow: hidden;">
+                                            <thead>
+                                                <tr style="background: var(--mud-palette-error);">
+                                                    <th style="width: 200px; color: white;">Field</th>
+                                                    <th style="color: white;">Value</th>
+                                                    <th style="width: 80px; color: white;">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var kvp in _selectedValue.HashValue ?? new Dictionary<string, string>())
+                                                {
+                                                    <tr>
+                                                        <td style="vertical-align: top;"><MudChip T="string" Size="Size.Small" Color="Color.Error">@kvp.Key</MudChip></td>
+                                                        <td style="font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;">
+                                                            @if (_editingHashField == kvp.Key)
+                                                            {
+                                                                <div style="display: flex; flex-direction: column; gap: 8px;">
+                                                                    <MudTextField @bind-Value="_editHashValue"
+                                                                                  Variant="Variant.Outlined"
+                                                                                  Lines="6"
+                                                                                  AutoGrow="true"
+                                                                                  Style="font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;"
+                                                                                  Margin="Margin.Dense" />
+                                                                    <div style="display: flex; gap: 8px;">
+                                                                        <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small" OnClick="CancelEditingHash" Disabled="_isSavingHash">
+                                                                            Cancel
+                                                                        </MudButton>
+                                                                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SaveHashField" Disabled="_isSavingHash">
+                                                                            @if (_isSavingHash)
+                                                                            {
+                                                                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                                                                            }
+                                                                            Save
+                                                                        </MudButton>
+                                                                    </div>
+                                                                </div>
+                                                            }
+                                                            else if (IsJson(kvp.Value))
+                                                            {
+                                                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                                                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">JSON</MudChip>
+                                                                </div>
+                                                                <pre style="margin: 0; white-space: pre; background: #1e1e1e; padding: 8px; border-radius: 4px; overflow: auto; max-height: 300px;">@FormatJson(kvp.Value)</pre>
+                                                            }
+                                                            else
+                                                            {
+                                                                @kvp.Value
+                                                            }
+                                                        </td>
+                                                        <td style="vertical-align: top;">
+                                                            @if (_editingHashField != kvp.Key)
+                                                            {
+                                                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                                                                               OnClick="@(() => StartEditingHashField(kvp.Key, kvp.Value))" />
+                                                            }
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </MudSimpleTable>
+                                        break;
+
+                                    default:
+                                        <MudAlert Severity="Severity.Info">@_selectedValue.Value</MudAlert>
+                                        break;
+                                }
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; color: var(--mud-palette-text-secondary);">
+                            <MudIcon Icon="@Icons.Material.Outlined.TouchApp" Style="font-size: 64px;" Color="Color.Primary" />
+                            <MudText Typo="Typo.h6" Class="mt-3">Select a key</MudText>
+                            <MudText Typo="Typo.body2">Click on a key from the list to view its value</MudText>
+                        </div>
+                    }
+                </MudPaper>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div style="display: flex; justify-content: center; align-items: center; height: 100%;">
+            <MudPaper Elevation="4" Class="pa-8" Style="border-radius: 16px; max-width: 500px; width: 100%;">
+                <div style="text-align: center;">
+                    <div style="background: linear-gradient(135deg, #e94560 0%, #0f3460 100%); border-radius: 50%; width: 100px; height: 100px; margin: 0 auto 24px; display: flex; align-items: center; justify-content: center;">
+                        <MudIcon Icon="@Icons.Material.Filled.Storage" Style="font-size: 48px; color: white;" />
+                    </div>
+                    <MudText Typo="Typo.h4" Style="font-weight: 700;" Class="mb-2">Redis Viewer</MudText>
+                    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mb-6">
+                        Browse and manage your Redis keys with ease
+                    </MudText>
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: 16px;">
+                    <div style="display: flex; gap: 12px;">
+                        <MudTextField @bind-Value="_connectionHost"
+                                      Label="Host"
+                                      Placeholder="localhost"
+                                      Variant="Variant.Outlined"
+                                      Adornment="Adornment.Start"
+                                      AdornmentIcon="@Icons.Material.Filled.Dns"
+                                      Style="flex: 2;" />
+                        <MudNumericField @bind-Value="_connectionPort"
+                                         Label="Port"
+                                         Variant="Variant.Outlined"
+                                         Min="1"
+                                         Max="65535"
+                                         Style="flex: 1;" />
+                    </div>
+
+                    <MudTextField @bind-Value="_connectionPassword"
+                                  Label="Password (optional)"
+                                  Placeholder="Leave empty if no auth"
+                                  Variant="Variant.Outlined"
+                                  Adornment="Adornment.End"
+                                  AdornmentIcon="@(_showPassword ? Icons.Material.Filled.Visibility : Icons.Material.Filled.VisibilityOff)"
+                                  OnAdornmentClick="() => _showPassword = !_showPassword"
+                                  InputType="@(_showPassword ? InputType.Text : InputType.Password)" />
+
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                               StartIcon="@(_isConnecting ? null : Icons.Material.Filled.Link)"
+                               OnClick="Connect" Disabled="_isConnecting || string.IsNullOrWhiteSpace(_connectionHost)"
+                               Style="border-radius: 8px; text-transform: none; font-weight: 600; margin-top: 8px;"
+                               FullWidth="true">
+                        @if (_isConnecting)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" Color="Color.Inherit" />
+                            <span>Connecting...</span>
+                        }
+                        else
+                        {
+                            <span>Connect</span>
+                        }
+                    </MudButton>
+                </div>
+            </MudPaper>
+        </div>
+    }
+</div>
+
+<footer style="position: fixed; bottom: 0; left: 0; right: 0; padding: 8px 16px; background: linear-gradient(90deg, #1a1a2e 0%, #16213e 100%); text-align: center; z-index: 1000;">
+    <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.7);">
+        Developed by <a href="https://github.com/0xZunia/" target="_blank" style="color: #e94560; font-weight: bold; text-decoration: none;">Reyan CARLIER</a>
+    </MudText>
+</footer>
+
+<style>
+    .key-item:hover {
+        background: var(--mud-palette-action-default-hover) !important;
+    }
+</style>
+
+@code {
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#1976d2",
+            Secondary = "#9c27b0",
+            Info = "#0288d1",
+            Success = "#2e7d32",
+            Warning = "#ed6c02",
+            Error = "#d32f2f",
+            Background = "#f5f5f5",
+            Surface = "#ffffff",
+            AppbarBackground = "#1a1a2e"
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#90caf9",
+            Secondary = "#ce93d8",
+            Info = "#29b6f6",
+            Success = "#66bb6a",
+            Warning = "#ffa726",
+            Error = "#f44336",
+            Surface = "#1e1e2d",
+            Background = "#121212",
+            BackgroundGray = "#2d2d3d",
+            AppbarBackground = "#1a1a2e"
+        }
+    };
+
+    private bool _isDarkMode = true;
+    private List<RedisKeyInfo> _keys = [];
+    private List<RedisKeyInfo> _stringKeys = [];
+    private List<RedisKeyInfo> _hashKeys = [];
+    private List<RedisKeyInfo> _otherKeys = [];
+    private RedisKeyInfo? _selectedKey;
+    private RedisValueResult? _selectedValue;
+    private ServerInfo? _serverInfo;
+    private string _searchPattern = "*";
+    private bool _isConnecting;
+    private bool _isStreaming;
+    private bool _isLoadingValue;
+    private CancellationTokenSource? _streamCts;
+    private int _activeTabIndex = 0;
+
+    // Edit mode state
+    private bool _isEditingString;
+    private string _editStringValue = "";
+    private bool _isSavingString;
+    private string? _editingHashField;
+    private string _editHashValue = "";
+    private bool _isSavingHash;
+
+    // Connection settings
+    private string _connectionHost = "localhost";
+    private int _connectionPort = 6379;
+    private string _connectionPassword = "";
+    private bool _showPassword;
+
+    private void ToggleTheme() => _isDarkMode = !_isDarkMode;
+
+    private async Task Connect()
+    {
+        _isConnecting = true;
+        StateHasChanged();
+
+        try
+        {
+            var password = string.IsNullOrWhiteSpace(_connectionPassword) ? null : _connectionPassword;
+            var connected = await Redis.ConnectAsync(_connectionHost, _connectionPort, password);
+            if (connected)
+            {
+                try
+                {
+                    _serverInfo = await Redis.GetServerInfoAsync();
+                }
+                catch
+                {
+                    _serverInfo = null; // Server info not available, but connection is still valid
+                }
+                Snackbar.Add("Connected to Redis", Severity.Success);
+                await RefreshKeys();
+            }
+            else
+            {
+                Snackbar.Add($"Failed to connect to {_connectionHost}:{_connectionPort}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Connection error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isConnecting = false;
+        }
+    }
+
+    private async Task Disconnect()
+    {
+        await CancelStreamingAsync();
+        Redis.Disconnect();
+        _keys = [];
+        _stringKeys = [];
+        _hashKeys = [];
+        _otherKeys = [];
+        _selectedKey = null;
+        _selectedValue = null;
+        _serverInfo = null;
+        StateHasChanged();
+        Snackbar.Add("Disconnected from Redis", Severity.Info);
+    }
+
+    private async Task RefreshKeys()
+    {
+        // Cancel any existing streaming operation first
+        await CancelStreamingAsync();
+
+        // Clear everything
+        _keys = [];
+        _stringKeys = [];
+        _hashKeys = [];
+        _otherKeys = [];
+        _selectedKey = null;
+        _selectedValue = null;
+        _isStreaming = true;
+        _streamCts = new CancellationTokenSource();
+
+        // Force UI update to show empty state
+        StateHasChanged();
+        await Task.Delay(10);
+
+        var tempKeys = new List<RedisKeyInfo>(1000);
+        var currentCts = _streamCts;
+
+        try
+        {
+            await foreach (var key in Redis.StreamKeysAsync(_searchPattern, currentCts.Token))
+            {
+                if (currentCts.Token.IsCancellationRequested)
+                    break;
+
+                tempKeys.Add(key);
+
+                // Update UI every 1000 keys for better performance
+                if (tempKeys.Count % 1000 == 0)
+                {
+                    UpdateFilteredLists(tempKeys);
+                    StateHasChanged();
+                    await Task.Delay(1);
+                }
+            }
+
+            if (!currentCts.Token.IsCancellationRequested)
+            {
+                UpdateFilteredLists(tempKeys);
+                Snackbar.Add($"Loaded {_keys.Count:N0} keys", Severity.Success);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            UpdateFilteredLists(tempKeys);
+            Snackbar.Add($"Loading stopped at {_keys.Count:N0} keys", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            _keys = [];
+            _stringKeys = [];
+            _hashKeys = [];
+            _otherKeys = [];
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isStreaming = false;
+            StateHasChanged();
+        }
+    }
+
+    private void UpdateFilteredLists(List<RedisKeyInfo> keys)
+    {
+        var sorted = keys.OrderBy(k => k.Key).ToList();
+        _keys = sorted;
+        _stringKeys = sorted.Where(k => k.Type == "String").ToList();
+        _hashKeys = sorted.Where(k => k.Type == "Hash").ToList();
+        _otherKeys = sorted.Where(k => k.Type != "String" && k.Type != "Hash").ToList();
+    }
+
+    private void CancelStreaming()
+    {
+        try
+        {
+            _streamCts?.Cancel();
+        }
+        catch { }
+    }
+
+    private async Task CancelStreamingAsync()
+    {
+        if (_streamCts != null)
+        {
+            try
+            {
+                await _streamCts.CancelAsync();
+                await Task.Delay(50); // Give time for the streaming to stop
+            }
+            catch { }
+            finally
+            {
+                _streamCts.Dispose();
+                _streamCts = null;
+            }
+        }
+        _isStreaming = false;
+    }
+
+    private async Task OnPatternChanged(string pattern)
+    {
+        _searchPattern = string.IsNullOrWhiteSpace(pattern) ? "*" : pattern;
+        await RefreshKeys();
+    }
+
+    private async Task SelectKey(RedisKeyInfo key)
+    {
+        _selectedKey = key;
+        _isLoadingValue = true;
+        StateHasChanged();
+
+        try
+        {
+            _selectedValue = await Redis.GetValueAsync(key.Key);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+            _selectedValue = null;
+        }
+        finally
+        {
+            _isLoadingValue = false;
+        }
+    }
+
+    private async Task DeleteSelectedKey()
+    {
+        if (_selectedKey == null) return;
+
+        try
+        {
+            await Redis.DeleteKeyAsync(_selectedKey.Key);
+            Snackbar.Add($"Key deleted", Severity.Success);
+            _keys.Remove(_selectedKey);
+            _selectedKey = null;
+            _selectedValue = null;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void CopyValue()
+    {
+        Snackbar.Add("Value copied to clipboard", Severity.Info);
+    }
+
+    private Color GetTypeColor(string type) => type switch
+    {
+        "String" => Color.Primary,
+        "List" => Color.Success,
+        "Set" => Color.Info,
+        "SortedSet" => Color.Warning,
+        "Hash" => Color.Error,
+        "Stream" => Color.Secondary,
+        _ => Color.Default
+    };
+
+    private string FormatTtl(TimeSpan ttl)
+    {
+        if (ttl.TotalDays >= 1) return $"{(int)ttl.TotalDays}d";
+        if (ttl.TotalHours >= 1) return $"{(int)ttl.TotalHours}h";
+        return ttl.TotalMinutes >= 1 ? $"{(int)ttl.TotalMinutes}m" : $"{(int)ttl.TotalSeconds}s";
+    }
+
+    private string FormatSize(long size, string type) => type switch
+    {
+        "String" => size > 1024 ? $"{size / 1024:N0} KB" : $"{size} B",
+        _ => $"{size} items"
+    };
+
+    private bool IsJson(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        value = value.Trim();
+        if ((value.StartsWith("{") && value.EndsWith("}")) ||
+            (value.StartsWith("[") && value.EndsWith("]")))
+        {
+            try
+            {
+                JsonDocument.Parse(value);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private string FormatJson(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return value ?? "";
+
+        try
+        {
+            using var doc = JsonDocument.Parse(value);
+            return JsonSerializer.Serialize(doc, new JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+        }
+        catch
+        {
+            return value;
+        }
+    }
+
+    // String editing methods
+    private void StartEditingString()
+    {
+        _editStringValue = _selectedValue?.Value ?? "";
+        _isEditingString = true;
+    }
+
+    private void CancelEditingString()
+    {
+        _isEditingString = false;
+        _editStringValue = "";
+    }
+
+    private async Task SaveStringValue()
+    {
+        if (_selectedKey == null) return;
+
+        _isSavingString = true;
+        StateHasChanged();
+
+        try
+        {
+            await Redis.SetStringAsync(_selectedKey.Key, _editStringValue);
+            _selectedValue = await Redis.GetValueAsync(_selectedKey.Key);
+            _isEditingString = false;
+            Snackbar.Add("Value saved", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error saving: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSavingString = false;
+        }
+    }
+
+    // Hash editing methods
+    private void StartEditingHashField(string field, string value)
+    {
+        _editingHashField = field;
+        _editHashValue = value;
+    }
+
+    private void CancelEditingHash()
+    {
+        _editingHashField = null;
+        _editHashValue = "";
+    }
+
+    private async Task SaveHashField()
+    {
+        if (_selectedKey == null || _editingHashField == null) return;
+
+        _isSavingHash = true;
+        StateHasChanged();
+
+        try
+        {
+            await Redis.SetHashFieldAsync(_selectedKey.Key, _editingHashField, _editHashValue);
+            _selectedValue = await Redis.GetValueAsync(_selectedKey.Key);
+            _editingHashField = null;
+            Snackbar.Add("Field saved", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error saving: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSavingHash = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            _streamCts?.Cancel();
+            _streamCts?.Dispose();
+        }
+        catch { }
+        _keys = [];
+        _stringKeys = [];
+        _hashKeys = [];
+        _otherKeys = [];
+    }
+}

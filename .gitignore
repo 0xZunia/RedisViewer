@@ -1,0 +1,22 @@
+# Build outputs
+bin/
+obj/
+publish/
+
+# IDE
+.idea/
+.vs/
+*.user
+riderModule.iml
+/_ReSharper.Caches/
+
+# NuGet
+/packages/
+*.nupkg
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local settings
+appsettings.*.local.json

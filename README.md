@@ -1,5 +1,11 @@
 # Redis Viewer
 
+[![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
+[![Blazor](https://img.shields.io/badge/Blazor-Server-512BD4?logo=blazor)](https://dotnet.microsoft.com/apps/aspnet/web-apps/blazor)
+[![Redis](https://img.shields.io/badge/Redis-Client-DC382D?logo=redis&logoColor=white)](https://redis.io/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/0xZunia/RedisViewer?style=social)](https://github.com/0xZunia/RedisViewer)
+
 A modern, web-based Redis client built with Blazor Server and MudBlazor. Browse and manage your Redis keys with a clean, intuitive interface.
 
 ## Features

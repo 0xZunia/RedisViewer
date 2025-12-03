@@ -185,6 +185,66 @@ public class RedisService : IDisposable
         return await db.HashSetAsync(key, field, value);
     }
 
+    public async Task<bool> DeleteHashFieldAsync(string key, string field)
+    {
+        var db = GetDatabase();
+        return await db.HashDeleteAsync(key, field);
+    }
+
+    // List operations
+    public async Task<long> ListPushAsync(string key, string value, bool pushRight = true)
+    {
+        var db = GetDatabase();
+        return pushRight
+            ? await db.ListRightPushAsync(key, value)
+            : await db.ListLeftPushAsync(key, value);
+    }
+
+    public async Task<long> ListRemoveAsync(string key, string value, long count = 0)
+    {
+        var db = GetDatabase();
+        return await db.ListRemoveAsync(key, value, count);
+    }
+
+    public async Task ListSetAsync(string key, long index, string value)
+    {
+        var db = GetDatabase();
+        await db.ListSetByIndexAsync(key, index, value);
+    }
+
+    // Set operations
+    public async Task<bool> SetAddAsync(string key, string value)
+    {
+        var db = GetDatabase();
+        return await db.SetAddAsync(key, value);
+    }
+
+    public async Task<bool> SetRemoveAsync(string key, string value)
+    {
+        var db = GetDatabase();
+        return await db.SetRemoveAsync(key, value);
+    }
+
+    // Sorted Set operations
+    public async Task<bool> SortedSetAddAsync(string key, string member, double score)
+    {
+        var db = GetDatabase();
+        return await db.SortedSetAddAsync(key, member, score);
+    }
+
+    public async Task<bool> SortedSetRemoveAsync(string key, string member)
+    {
+        var db = GetDatabase();
+        return await db.SortedSetRemoveAsync(key, member);
+    }
+
+    // Key existence check
+    public async Task<bool> KeyExistsAsync(string key)
+    {
+        var db = GetDatabase();
+        return await db.KeyExistsAsync(key);
+    }
+
     public async Task<long> GetDbSizeAsync()
     {
         var server = GetServer();

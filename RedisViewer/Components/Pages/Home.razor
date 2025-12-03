@@ -72,6 +72,10 @@
                                   Margin="Margin.Dense" />
 
                     <MudButtonGroup Variant="Variant.Filled" Size="Size.Small" OverrideStyles="false">
+                        <MudButton Color="Color.Success" StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="OpenCreateKeyDialog">
+                            New Key
+                        </MudButton>
                         <MudButton Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
                                    OnClick="RefreshKeys" Disabled="_isStreaming">
                             Refresh
@@ -348,20 +352,65 @@
                                         break;
 
                                     case "List":
+                                        <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+                                            <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
+                                                       StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAddListItemDialog">
+                                                Add Item
+                                            </MudButton>
+                                        </div>
                                         <MudSimpleTable Dense="true" Hover="true" Bordered="true" Style="border-radius: 8px; overflow: hidden;">
                                             <thead>
-                                                <tr style="background: var(--mud-palette-primary);">
+                                                <tr style="background: var(--mud-palette-success);">
                                                     <th style="width: 80px; color: white;">Index</th>
                                                     <th style="color: white;">Value</th>
+                                                    <th style="width: 100px; color: white;">Actions</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 @for (int i = 0; i < _selectedValue.ListValue?.Count; i++)
                                                 {
                                                     var index = i;
+                                                    var value = _selectedValue.ListValue[index];
                                                     <tr>
-                                                        <td><MudChip T="string" Size="Size.Small" Color="Color.Primary">@index</MudChip></td>
-                                                        <td style="font-family: 'Consolas', monospace;">@_selectedValue.ListValue[index]</td>
+                                                        <td><MudChip T="string" Size="Size.Small" Color="Color.Success">@index</MudChip></td>
+                                                        <td style="font-family: 'Consolas', monospace;">
+                                                            @if (_editingListIndex == index)
+                                                            {
+                                                                <div style="display: flex; flex-direction: column; gap: 8px;">
+                                                                    <MudTextField @bind-Value="_editListValue"
+                                                                                  Variant="Variant.Outlined"
+                                                                                  Lines="3"
+                                                                                  AutoGrow="true"
+                                                                                  Style="font-family: 'Consolas', monospace;"
+                                                                                  Margin="Margin.Dense" />
+                                                                    <div style="display: flex; gap: 8px;">
+                                                                        <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small" OnClick="CancelEditingListItem" Disabled="_isSavingListItem">
+                                                                            Cancel
+                                                                        </MudButton>
+                                                                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="SaveListItem" Disabled="_isSavingListItem">
+                                                                            @if (_isSavingListItem)
+                                                                            {
+                                                                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                                                                            }
+                                                                            Save
+                                                                        </MudButton>
+                                                                    </div>
+                                                                </div>
+                                                            }
+                                                            else
+                                                            {
+                                                                @value
+                                                            }
+                                                        </td>
+                                                        <td>
+                                                            @if (_editingListIndex != index)
+                                                            {
+                                                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                                                                               OnClick="@(() => StartEditingListItem(index, value))" />
+                                                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                                               OnClick="@(() => DeleteListItem(value))" />
+                                                            }
+                                                        </td>
                                                     </tr>
                                                 }
                                             </tbody>
@@ -369,10 +418,17 @@
                                         break;
 
                                     case "Set":
+                                        <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+                                            <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
+                                                       StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAddSetMemberDialog">
+                                                Add Member
+                                            </MudButton>
+                                        </div>
                                         <MudSimpleTable Dense="true" Hover="true" Bordered="true" Style="border-radius: 8px; overflow: hidden;">
                                             <thead>
                                                 <tr style="background: var(--mud-palette-info);">
                                                     <th style="color: white;">Member</th>
+                                                    <th style="width: 80px; color: white;">Actions</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -380,6 +436,10 @@
                                                 {
                                                     <tr>
                                                         <td style="font-family: 'Consolas', monospace;">@member</td>
+                                                        <td>
+                                                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                                           OnClick="@(() => DeleteSetMember(member))" />
+                                                        </td>
                                                     </tr>
                                                 }
                                             </tbody>
@@ -387,19 +447,53 @@
                                         break;
 
                                     case "SortedSet":
+                                        <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+                                            <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
+                                                       StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAddSortedSetMemberDialog">
+                                                Add Member
+                                            </MudButton>
+                                        </div>
                                         <MudSimpleTable Dense="true" Hover="true" Bordered="true" Style="border-radius: 8px; overflow: hidden;">
                                             <thead>
                                                 <tr style="background: var(--mud-palette-warning);">
-                                                    <th style="width: 120px; color: white;">Score</th>
+                                                    <th style="width: 150px; color: white;">Score</th>
                                                     <th style="color: white;">Member</th>
+                                                    <th style="width: 100px; color: white;">Actions</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 @foreach (var entry in _selectedValue.SortedSetValue ?? [])
                                                 {
                                                     <tr>
-                                                        <td><MudChip T="string" Size="Size.Small" Color="Color.Warning">@entry.Score</MudChip></td>
+                                                        <td>
+                                                            @if (_editingSortedSetMember == entry.Member)
+                                                            {
+                                                                <div style="display: flex; align-items: center; gap: 4px;">
+                                                                    <MudNumericField @bind-Value="_editSortedSetScore"
+                                                                                     Variant="Variant.Outlined"
+                                                                                     Margin="Margin.Dense"
+                                                                                     Style="width: 80px;" />
+                                                                    <MudIconButton Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Success"
+                                                                                   OnClick="SaveSortedSetMember" Disabled="_isSavingSortedSetMember" />
+                                                                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Default"
+                                                                                   OnClick="CancelEditingSortedSetMember" Disabled="_isSavingSortedSetMember" />
+                                                                </div>
+                                                            }
+                                                            else
+                                                            {
+                                                                <MudChip T="string" Size="Size.Small" Color="Color.Warning">@entry.Score</MudChip>
+                                                            }
+                                                        </td>
                                                         <td style="font-family: 'Consolas', monospace;">@entry.Member</td>
+                                                        <td>
+                                                            @if (_editingSortedSetMember != entry.Member)
+                                                            {
+                                                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                                                                               OnClick="@(() => StartEditingSortedSetMember(entry.Member, entry.Score))" />
+                                                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                                               OnClick="@(() => DeleteSortedSetMember(entry.Member))" />
+                                                            }
+                                                        </td>
                                                     </tr>
                                                 }
                                             </tbody>
@@ -407,12 +501,18 @@
                                         break;
 
                                     case "Hash":
+                                        <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+                                            <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
+                                                       StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAddHashFieldDialog">
+                                                Add Field
+                                            </MudButton>
+                                        </div>
                                         <MudSimpleTable Dense="true" Hover="true" Bordered="true" Style="border-radius: 8px; overflow: hidden;">
                                             <thead>
                                                 <tr style="background: var(--mud-palette-error);">
                                                     <th style="width: 200px; color: white;">Field</th>
                                                     <th style="color: white;">Value</th>
-                                                    <th style="width: 80px; color: white;">Actions</th>
+                                                    <th style="width: 100px; color: white;">Actions</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -461,6 +561,8 @@
                                                             {
                                                                 <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
                                                                                OnClick="@(() => StartEditingHashField(kvp.Key, kvp.Value))" />
+                                                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                                               OnClick="@(() => DeleteHashField(kvp.Key))" />
                                                             }
                                                         </td>
                                                     </tr>
@@ -549,6 +651,133 @@
     }
 </div>
 
+@* Create Key Dialog *@
+<MudDialog @bind-Visible="_showCreateKeyDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Add" Class="mr-2" />
+            Create New Key
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+            <MudTextField @bind-Value="_newKeyName" Label="Key Name" Variant="Variant.Outlined" Required="true" />
+            <MudSelect @bind-Value="_newKeyType" Label="Type" Variant="Variant.Outlined">
+                <MudSelectItem Value="@("String")">String</MudSelectItem>
+                <MudSelectItem Value="@("Hash")">Hash</MudSelectItem>
+                <MudSelectItem Value="@("List")">List</MudSelectItem>
+                <MudSelectItem Value="@("Set")">Set</MudSelectItem>
+                <MudSelectItem Value="@("SortedSet")">Sorted Set</MudSelectItem>
+            </MudSelect>
+            @switch (_newKeyType)
+            {
+                case "String":
+                    <MudTextField @bind-Value="_newKeyValue" Label="Value" Variant="Variant.Outlined" Lines="4" />
+                    break;
+                case "Hash":
+                    <MudTextField @bind-Value="_newHashField" Label="Field Name" Variant="Variant.Outlined" />
+                    <MudTextField @bind-Value="_newHashValue" Label="Field Value" Variant="Variant.Outlined" Lines="3" />
+                    break;
+                case "List":
+                case "Set":
+                    <MudTextField @bind-Value="_newKeyValue" Label="Initial Value" Variant="Variant.Outlined" />
+                    break;
+                case "SortedSet":
+                    <MudTextField @bind-Value="_newKeyValue" Label="Member" Variant="Variant.Outlined" />
+                    <MudNumericField @bind-Value="_newSortedSetScore" Label="Score" Variant="Variant.Outlined" />
+                    break;
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseCreateKeyDialog" Disabled="_isCreatingKey">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="CreateKey" Disabled="_isCreatingKey || string.IsNullOrWhiteSpace(_newKeyName)">
+            @if (_isCreatingKey)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Create
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Add Hash Field Dialog *@
+<MudDialog @bind-Visible="_showAddHashFieldDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Add Hash Field</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+            <MudTextField @bind-Value="_addHashFieldName" Label="Field Name" Variant="Variant.Outlined" Required="true" />
+            <MudTextField @bind-Value="_addHashFieldValue" Label="Value" Variant="Variant.Outlined" Lines="4" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showAddHashFieldDialog = false" Disabled="_isAddingHashField">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="AddHashField" Disabled="_isAddingHashField || string.IsNullOrWhiteSpace(_addHashFieldName)">
+            @if (_isAddingHashField) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            Add
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Add List Item Dialog *@
+<MudDialog @bind-Visible="_showAddListItemDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Add List Item</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+            <MudTextField @bind-Value="_addListItemValue" Label="Value" Variant="Variant.Outlined" Lines="3" Required="true" />
+            <MudSwitch @bind-Value="_addListItemRight" Label="@(_addListItemRight ? "Add to end (RPUSH)" : "Add to start (LPUSH)")" Color="Color.Primary" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showAddListItemDialog = false" Disabled="_isAddingListItem">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="AddListItem" Disabled="_isAddingListItem || string.IsNullOrWhiteSpace(_addListItemValue)">
+            @if (_isAddingListItem) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            Add
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Add Set Member Dialog *@
+<MudDialog @bind-Visible="_showAddSetMemberDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Add Set Member</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_addSetMemberValue" Label="Member" Variant="Variant.Outlined" Required="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showAddSetMemberDialog = false" Disabled="_isAddingSetMember">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="AddSetMember" Disabled="_isAddingSetMember || string.IsNullOrWhiteSpace(_addSetMemberValue)">
+            @if (_isAddingSetMember) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            Add
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Add Sorted Set Member Dialog *@
+<MudDialog @bind-Visible="_showAddSortedSetMemberDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Add Sorted Set Member</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+            <MudTextField @bind-Value="_addSortedSetMemberValue" Label="Member" Variant="Variant.Outlined" Required="true" />
+            <MudNumericField @bind-Value="_addSortedSetMemberScore" Label="Score" Variant="Variant.Outlined" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showAddSortedSetMemberDialog = false" Disabled="_isAddingSortedSetMember">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="AddSortedSetMember" Disabled="_isAddingSortedSetMember || string.IsNullOrWhiteSpace(_addSortedSetMemberValue)">
+            @if (_isAddingSortedSetMember) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            Add
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
 <footer style="position: fixed; bottom: 0; left: 0; right: 0; padding: 8px 16px; background: linear-gradient(90deg, #1a1a2e 0%, #16213e 100%); text-align: center; z-index: 1000;">
     <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.7);">
         Developed by <a href="https://github.com/0xZunia/" target="_blank" style="color: #e94560; font-weight: bold; text-decoration: none;">Reyan CARLIER</a>
@@ -613,6 +842,46 @@
     private string? _editingHashField;
     private string _editHashValue = "";
     private bool _isSavingHash;
+
+    // Create key dialog
+    private bool _showCreateKeyDialog;
+    private string _newKeyName = "";
+    private string _newKeyType = "String";
+    private string _newKeyValue = "";
+    private string _newHashField = "";
+    private string _newHashValue = "";
+    private double _newSortedSetScore;
+    private bool _isCreatingKey;
+
+    // Add item dialogs
+    private bool _showAddHashFieldDialog;
+    private string _addHashFieldName = "";
+    private string _addHashFieldValue = "";
+    private bool _isAddingHashField;
+
+    private bool _showAddListItemDialog;
+    private string _addListItemValue = "";
+    private bool _addListItemRight = true;
+    private bool _isAddingListItem;
+
+    private bool _showAddSetMemberDialog;
+    private string _addSetMemberValue = "";
+    private bool _isAddingSetMember;
+
+    private bool _showAddSortedSetMemberDialog;
+    private string _addSortedSetMemberValue = "";
+    private double _addSortedSetMemberScore;
+    private bool _isAddingSortedSetMember;
+
+    // Edit list item
+    private int? _editingListIndex;
+    private string _editListValue = "";
+    private bool _isSavingListItem;
+
+    // Edit sorted set member
+    private string? _editingSortedSetMember;
+    private double _editSortedSetScore;
+    private bool _isSavingSortedSetMember;
 
     // Connection settings
     private string _connectionHost = "localhost";
@@ -963,6 +1232,339 @@
         finally
         {
             _isSavingHash = false;
+        }
+    }
+
+    // Create key dialog methods
+    private void OpenCreateKeyDialog()
+    {
+        _newKeyName = "";
+        _newKeyType = "String";
+        _newKeyValue = "";
+        _newHashField = "";
+        _newHashValue = "";
+        _newSortedSetScore = 0;
+        _showCreateKeyDialog = true;
+    }
+
+    private void CloseCreateKeyDialog()
+    {
+        _showCreateKeyDialog = false;
+    }
+
+    private async Task CreateKey()
+    {
+        if (string.IsNullOrWhiteSpace(_newKeyName)) return;
+
+        _isCreatingKey = true;
+        StateHasChanged();
+
+        try
+        {
+            var exists = await Redis.KeyExistsAsync(_newKeyName);
+            if (exists)
+            {
+                Snackbar.Add("Key already exists", Severity.Warning);
+                return;
+            }
+
+            switch (_newKeyType)
+            {
+                case "String":
+                    await Redis.SetStringAsync(_newKeyName, _newKeyValue);
+                    break;
+                case "Hash":
+                    if (!string.IsNullOrWhiteSpace(_newHashField))
+                        await Redis.SetHashFieldAsync(_newKeyName, _newHashField, _newHashValue);
+                    break;
+                case "List":
+                    if (!string.IsNullOrWhiteSpace(_newKeyValue))
+                        await Redis.ListPushAsync(_newKeyName, _newKeyValue);
+                    break;
+                case "Set":
+                    if (!string.IsNullOrWhiteSpace(_newKeyValue))
+                        await Redis.SetAddAsync(_newKeyName, _newKeyValue);
+                    break;
+                case "SortedSet":
+                    if (!string.IsNullOrWhiteSpace(_newKeyValue))
+                        await Redis.SortedSetAddAsync(_newKeyName, _newKeyValue, _newSortedSetScore);
+                    break;
+            }
+
+            Snackbar.Add($"Key '{_newKeyName}' created", Severity.Success);
+            _showCreateKeyDialog = false;
+            await RefreshKeys();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error creating key: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isCreatingKey = false;
+        }
+    }
+
+    // Hash field operations
+    private void OpenAddHashFieldDialog()
+    {
+        _addHashFieldName = "";
+        _addHashFieldValue = "";
+        _showAddHashFieldDialog = true;
+    }
+
+    private async Task AddHashField()
+    {
+        if (_selectedKey == null || string.IsNullOrWhiteSpace(_addHashFieldName)) return;
+
+        _isAddingHashField = true;
+        StateHasChanged();
+
+        try
+        {
+            await Redis.SetHashFieldAsync(_selectedKey.Key, _addHashFieldName, _addHashFieldValue);
+            _selectedValue = await Redis.GetValueAsync(_selectedKey.Key);
+            _showAddHashFieldDialog = false;
+            Snackbar.Add("Field added", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isAddingHashField = false;
+        }
+    }
+
+    private async Task DeleteHashField(string field)
+    {
+        if (_selectedKey == null) return;
+
+        try
+        {
+            await Redis.DeleteHashFieldAsync(_selectedKey.Key, field);
+            _selectedValue = await Redis.GetValueAsync(_selectedKey.Key);
+            Snackbar.Add("Field deleted", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // List operations
+    private void OpenAddListItemDialog()
+    {
+        _addListItemValue = "";
+        _addListItemRight = true;
+        _showAddListItemDialog = true;
+    }
+
+    private async Task AddListItem()
+    {
+        if (_selectedKey == null || string.IsNullOrWhiteSpace(_addListItemValue)) return;
+
+        _isAddingListItem = true;
+        StateHasChanged();
+
+        try
+        {
+            await Redis.ListPushAsync(_selectedKey.Key, _addListItemValue, _addListItemRight);
+            _selectedValue = await Redis.GetValueAsync(_selectedKey.Key);
+            _showAddListItemDialog = false;
+            Snackbar.Add("Item added", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isAddingListItem = false;
+        }
+    }
+
+    private void StartEditingListItem(int index, string value)
+    {
+        _editingListIndex = index;
+        _editListValue = value;
+    }
+
+    private void CancelEditingListItem()
+    {
+        _editingListIndex = null;
+        _editListValue = "";
+    }
+
+    private async Task SaveListItem()
+    {
+        if (_selectedKey == null || _editingListIndex == null) return;
+
+        _isSavingListItem = true;
+        StateHasChanged();
+
+        try
+        {
+            await Redis.ListSetAsync(_selectedKey.Key, _editingListIndex.Value, _editListValue);
+            _selectedValue = await Redis.GetValueAsync(_selectedKey.Key);
+            _editingListIndex = null;
+            Snackbar.Add("Item updated", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSavingListItem = false;
+        }
+    }
+
+    private async Task DeleteListItem(string value)
+    {
+        if (_selectedKey == null) return;
+
+        try
+        {
+            await Redis.ListRemoveAsync(_selectedKey.Key, value, 1);
+            _selectedValue = await Redis.GetValueAsync(_selectedKey.Key);
+            Snackbar.Add("Item removed", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // Set operations
+    private void OpenAddSetMemberDialog()
+    {
+        _addSetMemberValue = "";
+        _showAddSetMemberDialog = true;
+    }
+
+    private async Task AddSetMember()
+    {
+        if (_selectedKey == null || string.IsNullOrWhiteSpace(_addSetMemberValue)) return;
+
+        _isAddingSetMember = true;
+        StateHasChanged();
+
+        try
+        {
+            await Redis.SetAddAsync(_selectedKey.Key, _addSetMemberValue);
+            _selectedValue = await Redis.GetValueAsync(_selectedKey.Key);
+            _showAddSetMemberDialog = false;
+            Snackbar.Add("Member added", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isAddingSetMember = false;
+        }
+    }
+
+    private async Task DeleteSetMember(string member)
+    {
+        if (_selectedKey == null) return;
+
+        try
+        {
+            await Redis.SetRemoveAsync(_selectedKey.Key, member);
+            _selectedValue = await Redis.GetValueAsync(_selectedKey.Key);
+            Snackbar.Add("Member removed", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // Sorted Set operations
+    private void OpenAddSortedSetMemberDialog()
+    {
+        _addSortedSetMemberValue = "";
+        _addSortedSetMemberScore = 0;
+        _showAddSortedSetMemberDialog = true;
+    }
+
+    private async Task AddSortedSetMember()
+    {
+        if (_selectedKey == null || string.IsNullOrWhiteSpace(_addSortedSetMemberValue)) return;
+
+        _isAddingSortedSetMember = true;
+        StateHasChanged();
+
+        try
+        {
+            await Redis.SortedSetAddAsync(_selectedKey.Key, _addSortedSetMemberValue, _addSortedSetMemberScore);
+            _selectedValue = await Redis.GetValueAsync(_selectedKey.Key);
+            _showAddSortedSetMemberDialog = false;
+            Snackbar.Add("Member added", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isAddingSortedSetMember = false;
+        }
+    }
+
+    private void StartEditingSortedSetMember(string member, double score)
+    {
+        _editingSortedSetMember = member;
+        _editSortedSetScore = score;
+    }
+
+    private void CancelEditingSortedSetMember()
+    {
+        _editingSortedSetMember = null;
+        _editSortedSetScore = 0;
+    }
+
+    private async Task SaveSortedSetMember()
+    {
+        if (_selectedKey == null || _editingSortedSetMember == null) return;
+
+        _isSavingSortedSetMember = true;
+        StateHasChanged();
+
+        try
+        {
+            await Redis.SortedSetAddAsync(_selectedKey.Key, _editingSortedSetMember, _editSortedSetScore);
+            _selectedValue = await Redis.GetValueAsync(_selectedKey.Key);
+            _editingSortedSetMember = null;
+            Snackbar.Add("Score updated", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSavingSortedSetMember = false;
+        }
+    }
+
+    private async Task DeleteSortedSetMember(string member)
+    {
+        if (_selectedKey == null) return;
+
+        try
+        {
+            await Redis.SortedSetRemoveAsync(_selectedKey.Key, member);
+            _selectedValue = await Redis.GetValueAsync(_selectedKey.Key);
+            Snackbar.Add("Member removed", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
         }
     }
 

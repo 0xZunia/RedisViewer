@@ -1,3 +1,6 @@
+<img width="750" height="400" alt="image" src="https://github.com/user-attachments/assets/c5d43325-d024-4e51-ab49-9ed609285d02" />
+<img width="750" height="400" alt="image" src="https://github.com/user-attachments/assets/2dd45299-84a7-4410-8392-cf0f1bf5f010" />
+
 # Redis Viewer
 
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)

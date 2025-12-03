@@ -24,7 +24,7 @@ A modern, web-based Redis client built with Blazor Server and MudBlazor. Browse 
 
 ## Prerequisites
 
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
 - A Redis server to connect to
 
 ## Getting Started

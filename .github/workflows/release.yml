@@ -1,0 +1,77 @@
+e-name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            runtime: win-x64
+            artifact: RedisViewer-windows-x64
+          - os: macos-latest
+            runtime: osx-x64
+            artifact: RedisViewer-macos-x64
+          - os: macos-latest
+            runtime: osx-arm64
+            artifact: RedisViewer-macos-arm64
+          - os: ubuntu-latest
+            runtime: linux-x64
+            artifact: RedisViewer-linux-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore RedisViewer/RedisViewer.csproj
+
+      - name: Publish
+        run: dotnet publish RedisViewer/RedisViewer.csproj -c Release -r ${{ matrix.runtime }} --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish/${{ matrix.artifact }}
+
+      - name: Zip artifacts (Windows)
+        if: matrix.os == 'windows-latest'
+        run: Compress-Archive -Path ./publish/${{ matrix.artifact }}/* -DestinationPath ./${{ matrix.artifact }}.zip
+        shell: pwsh
+
+      - name: Zip artifacts (Unix)
+        if: matrix.os != 'windows-latest'
+        run: cd ./publish/${{ matrix.artifact }} && zip -r ../../${{ matrix.artifact }}.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./${{ matrix.artifact }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./artifacts/**/*.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

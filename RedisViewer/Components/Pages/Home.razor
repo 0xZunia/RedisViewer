@@ -52,35 +52,56 @@
                    Color="Color.Inherit" OnClick="ToggleTheme" Class="ml-2" />
 </MudAppBar>
 
-<div style="padding-top: 48px; height: 100vh; overflow: hidden; background: var(--mud-palette-background);">
+<div style="padding-top: 48px; padding-bottom: 48px; height: 100vh; overflow: hidden; background: var(--mud-palette-background);">
     @if (Redis.IsConnected)
     {
         <div style="display: flex; flex-direction: column; height: 100%; padding: 16px; gap: 16px;">
             @* Search Bar *@
             <MudPaper Elevation="2" Class="pa-3" Style="border-radius: 12px;">
-                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                     <MudTextField @bind-Value="_searchPattern"
-                                  Label="Filter Pattern"
-                                  Placeholder="*, user:*, session:*"
+                                  Label="@(_searchInValues ? "Search in values" : "Filter Pattern")"
+                                  Placeholder="@(_searchInValues ? "Search text..." : "*, user:*, session:*")"
                                   Variant="Variant.Outlined"
                                   Adornment="Adornment.Start"
                                   AdornmentIcon="@Icons.Material.Filled.Search"
                                   Immediate="true"
                                   DebounceInterval="500"
                                   OnDebounceIntervalElapsed="OnPatternChanged"
-                                  Style="flex: 1; min-width: 250px;"
+                                  Style="flex: 1; min-width: 200px;"
                                   Margin="Margin.Dense" />
+
+                    <MudTooltip Text="Search in values instead of key names">
+                        <MudToggleIconButton @bind-Toggled="_searchInValues"
+                                             Icon="@Icons.Material.Outlined.TextFields"
+                                             ToggledIcon="@Icons.Material.Filled.TextFields"
+                                             Color="@(_searchInValues ? Color.Primary : Color.Default)"
+                                             Size="Size.Small" />
+                    </MudTooltip>
+
+                    <MudTooltip Text="Tree view by namespace">
+                        <MudIconButton Icon="@(_showTreeView ? Icons.Material.Filled.AccountTree : Icons.Material.Outlined.AccountTree)"
+                                       Color="@(_showTreeView ? Color.Primary : Color.Default)"
+                                       Size="Size.Small"
+                                       OnClick="ToggleTreeView" />
+                    </MudTooltip>
+
+                    <MudDivider Vertical="true" FlexItem="true" />
 
                     <MudButtonGroup Variant="Variant.Filled" Size="Size.Small" OverrideStyles="false">
                         <MudButton Color="Color.Success" StartIcon="@Icons.Material.Filled.Add"
                                    OnClick="OpenCreateKeyDialog">
-                            New Key
+                            New
+                        </MudButton>
+                        <MudButton Color="Color.Info" StartIcon="@Icons.Material.Filled.FileUpload"
+                                   OnClick="() => _showImportDialog = true">
+                            Import
                         </MudButton>
                         <MudButton Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
-                                   OnClick="RefreshKeys" Disabled="_isStreaming">
+                                   OnClick="RefreshKeys" Disabled="_isStreaming || _isSearchingValues">
                             Refresh
                         </MudButton>
-                        @if (_isStreaming)
+                        @if (_isStreaming || _isSearchingValues)
                         {
                             <MudButton Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
                                        OnClick="CancelStreaming">
@@ -89,12 +110,21 @@
                         }
                     </MudButtonGroup>
 
+                    @if (_selectedKeys.Count > 0)
+                    {
+                        <MudButton Color="Color.Error" Variant="Variant.Filled" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.DeleteSweep"
+                                   OnClick="RequestDeleteSelectedKeys">
+                            Delete (@_selectedKeys.Count)
+                        </MudButton>
+                    }
+
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <MudIcon Icon="@Icons.Material.Filled.Key" Size="Size.Small" Color="Color.Primary" />
                         <MudText Typo="Typo.body2">
                             <strong>@_keys.Count.ToString("N0")</strong> keys
                         </MudText>
-                        @if (_isStreaming)
+                        @if (_isStreaming || _isSearchingValues)
                         {
                             <MudProgressCircular Size="Size.Small" Indeterminate="true" Color="Color.Primary" />
                         }
@@ -106,35 +136,107 @@
             <div style="display: flex; flex: 1; gap: 16px; min-height: 0;">
                 @* Keys List with Tabs *@
                 <MudPaper Elevation="2" Style="width: 450px; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden;">
-                    @* Custom Tab Header *@
-                    <div style="display: flex; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                        <button @onclick="() => _activeTabIndex = 0"
-                                style="flex: 1; padding: 12px 8px; border: none; cursor: pointer; transition: all 0.2s;
-                                       background: @(_activeTabIndex == 0 ? "rgba(144, 202, 249, 0.2)" : "transparent");
-                                       border-bottom: 2px solid @(_activeTabIndex == 0 ? "#90caf9" : "transparent");
-                                       color: @(_activeTabIndex == 0 ? "#90caf9" : "inherit");">
-                            <MudIcon Icon="@Icons.Material.Filled.TextFields" Size="Size.Small" />
-                            <div style="font-size: 12px; margin-top: 4px;">Strings (@_stringKeys.Count.ToString("N0"))</div>
-                        </button>
-                        <button @onclick="() => _activeTabIndex = 1"
-                                style="flex: 1; padding: 12px 8px; border: none; cursor: pointer; transition: all 0.2s;
-                                       background: @(_activeTabIndex == 1 ? "rgba(244, 67, 54, 0.2)" : "transparent");
-                                       border-bottom: 2px solid @(_activeTabIndex == 1 ? "#f44336" : "transparent");
-                                       color: @(_activeTabIndex == 1 ? "#f44336" : "inherit");">
-                            <MudIcon Icon="@Icons.Material.Filled.Tag" Size="Size.Small" />
-                            <div style="font-size: 12px; margin-top: 4px;">Hashes (@_hashKeys.Count.ToString("N0"))</div>
-                        </button>
-                        <button @onclick="() => _activeTabIndex = 2"
-                                style="flex: 1; padding: 12px 8px; border: none; cursor: pointer; transition: all 0.2s;
-                                       background: @(_activeTabIndex == 2 ? "rgba(156, 39, 176, 0.2)" : "transparent");
-                                       border-bottom: 2px solid @(_activeTabIndex == 2 ? "#9c27b0" : "transparent");
-                                       color: @(_activeTabIndex == 2 ? "#9c27b0" : "inherit");">
-                            <MudIcon Icon="@Icons.Material.Filled.MoreHoriz" Size="Size.Small" />
-                            <div style="font-size: 12px; margin-top: 4px;">Other (@_otherKeys.Count.ToString("N0"))</div>
-                        </button>
-                    </div>
+                    @if (_showTreeView)
+                    {
+                        @* Tree View Header *@
+                        <div style="padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 8px;">
+                            <MudIcon Icon="@Icons.Material.Filled.AccountTree" Size="Size.Small" Color="Color.Primary" />
+                            <MudText Typo="Typo.subtitle2">@_namespaceGroups.Count namespaces (@_keys.Count keys)</MudText>
+                        </div>
+                        @* Tree View Content *@
+                        <div style="flex: 1; overflow-y: auto;">
+                            @if (!_namespaceGroups.Any() && !_isStreaming)
+                            {
+                                <div style="padding: 32px; text-align: center;">
+                                    <MudIcon Icon="@Icons.Material.Outlined.FolderOpen" Size="Size.Large" Color="Color.Secondary" />
+                                    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-2">No keys found</MudText>
+                                </div>
+                            }
+                            else
+                            {
+                                <Virtualize Items="_namespaceGroups" Context="ns" OverscanCount="3">
+                                    <div style="padding: 4px 8px;">
+                                        <div @onclick="() => ns.IsExpanded = !ns.IsExpanded"
+                                             style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer;
+                                                    background: var(--mud-palette-surface); border-radius: 8px;
+                                                    border: 1px solid rgba(255,255,255,0.1);">
+                                            <MudIcon Icon="@(ns.IsExpanded ? Icons.Material.Filled.FolderOpen : Icons.Material.Filled.Folder)"
+                                                     Color="Color.Warning" Size="Size.Small" />
+                                            <MudText Style="flex: 1; font-weight: 500;">@ns.Name</MudText>
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined"
+                                                     Style="height: 20px; font-size: 10px;">
+                                                @(ns.TotalCount > MaxKeysPerNamespace ? $"{MaxKeysPerNamespace}+ of {ns.TotalCount}" : ns.TotalCount.ToString())
+                                            </MudChip>
+                                            <MudIcon Icon="@(ns.IsExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                                     Size="Size.Small" />
+                                        </div>
+                                        @if (ns.IsExpanded)
+                                        {
+                                            <div style="margin-left: 20px; border-left: 2px solid rgba(255,255,255,0.1); padding-left: 8px; margin-top: 4px;">
+                                                @foreach (var key in ns.Keys)
+                                                {
+                                                    <div @onclick="() => SelectKey(key)"
+                                                         style="display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer;
+                                                                border-radius: 4px; margin: 2px 0;
+                                                                background: @(_selectedKey?.Key == key.Key ? "rgba(144, 202, 249, 0.2)" : "transparent");"
+                                                         class="key-item">
+                                                        <MudCheckBox T="bool" Value="_selectedKeys.Contains(key.Key)"
+                                                                     ValueChanged="@((bool v) => ToggleKeySelection(key.Key))"
+                                                                     Size="Size.Small" Style="margin: -4px 0;" />
+                                                        <MudIcon Icon="@GetTypeIcon(key.Type)" Color="@GetTypeColor(key.Type)" Size="Size.Small" />
+                                                        <MudText Style="flex: 1; font-family: 'Consolas', monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                                            @GetKeyDisplayName(key.Key, ns.Name)
+                                                        </MudText>
+                                                        <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(key.Type)"
+                                                                 Variant="Variant.Filled" Style="height: 16px; font-size: 9px;">
+                                                            @key.Type
+                                                        </MudChip>
+                                                    </div>
+                                                }
+                                                @if (ns.TotalCount > MaxKeysPerNamespace)
+                                                {
+                                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Style="padding: 8px 10px; font-style: italic;">
+                                                        ... and @(ns.TotalCount - MaxKeysPerNamespace) more keys (use filter to narrow down)
+                                                    </MudText>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                </Virtualize>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        @* Custom Tab Header *@
+                        <div style="display: flex; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <button @onclick="() => _activeTabIndex = 0"
+                                    style="flex: 1; padding: 12px 8px; border: none; cursor: pointer; transition: all 0.2s;
+                                           background: @(_activeTabIndex == 0 ? "rgba(144, 202, 249, 0.2)" : "transparent");
+                                           border-bottom: 2px solid @(_activeTabIndex == 0 ? "#90caf9" : "transparent");
+                                           color: @(_activeTabIndex == 0 ? "#90caf9" : "inherit");">
+                                <MudIcon Icon="@Icons.Material.Filled.TextFields" Size="Size.Small" />
+                                <div style="font-size: 12px; margin-top: 4px;">Strings (@_stringKeys.Count.ToString("N0"))</div>
+                            </button>
+                            <button @onclick="() => _activeTabIndex = 1"
+                                    style="flex: 1; padding: 12px 8px; border: none; cursor: pointer; transition: all 0.2s;
+                                           background: @(_activeTabIndex == 1 ? "rgba(244, 67, 54, 0.2)" : "transparent");
+                                           border-bottom: 2px solid @(_activeTabIndex == 1 ? "#f44336" : "transparent");
+                                           color: @(_activeTabIndex == 1 ? "#f44336" : "inherit");">
+                                <MudIcon Icon="@Icons.Material.Filled.Tag" Size="Size.Small" />
+                                <div style="font-size: 12px; margin-top: 4px;">Hashes (@_hashKeys.Count.ToString("N0"))</div>
+                            </button>
+                            <button @onclick="() => _activeTabIndex = 2"
+                                    style="flex: 1; padding: 12px 8px; border: none; cursor: pointer; transition: all 0.2s;
+                                           background: @(_activeTabIndex == 2 ? "rgba(156, 39, 176, 0.2)" : "transparent");
+                                           border-bottom: 2px solid @(_activeTabIndex == 2 ? "#9c27b0" : "transparent");
+                                           color: @(_activeTabIndex == 2 ? "#9c27b0" : "inherit");">
+                                <MudIcon Icon="@Icons.Material.Filled.MoreHoriz" Size="Size.Small" />
+                                <div style="font-size: 12px; margin-top: 4px;">Other (@_otherKeys.Count.ToString("N0"))</div>
+                            </button>
+                        </div>
 
-                    @* Tab Content with Virtualization *@
+                        @* Tab Content with Virtualization *@
                     @if (_activeTabIndex == 0)
                     {
                         <div style="flex: 1; overflow-y: auto;">
@@ -155,24 +257,28 @@
                             else
                             {
                                 <Virtualize Items="_stringKeys" Context="key" ItemSize="72" OverscanCount="3">
-                                    <div @onclick="() => SelectKey(key)"
-                                         style="padding: 12px 16px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.1); height: 72px; box-sizing: border-box;
-                                                background: @(_selectedKey?.Key == key.Key ? "rgba(144, 202, 249, 0.2)" : "transparent");
+                                    <div style="display: flex; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); height: 72px; box-sizing: border-box;
+                                                background: @(_selectedKey?.Key == key.Key ? "rgba(144, 202, 249, 0.2)" : (_selectedKeys.Contains(key.Key) ? "rgba(144, 202, 249, 0.1)" : "transparent"));
                                                 border-left: 3px solid @(_selectedKey?.Key == key.Key ? "#90caf9" : "transparent");"
                                          class="key-item">
-                                        <div style="font-family: 'Consolas', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px;">
-                                            @key.Key
-                                        </div>
-                                        <div style="display: flex; gap: 6px; margin-top: 8px;">
-                                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" Style="height: 20px; font-size: 10px;">String</MudChip>
-                                            @if (key.Size > 0)
-                                            {
-                                                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">@FormatSize(key.Size, key.Type)</MudChip>
-                                            }
-                                            @if (key.Ttl.HasValue)
-                                            {
-                                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">TTL: @FormatTtl(key.Ttl.Value)</MudChip>
-                                            }
+                                        <MudCheckBox T="bool" Value="_selectedKeys.Contains(key.Key)"
+                                                     ValueChanged="@((bool v) => ToggleKeySelection(key.Key))"
+                                                     Size="Size.Small" Class="ml-2" Style="margin-top: -4px;" />
+                                        <div @onclick="() => SelectKey(key)" style="flex: 1; padding: 12px 16px 12px 0; cursor: pointer;">
+                                            <div style="font-family: 'Consolas', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px;">
+                                                @key.Key
+                                            </div>
+                                            <div style="display: flex; gap: 6px; margin-top: 8px;">
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" Style="height: 20px; font-size: 10px;">String</MudChip>
+                                                @if (key.Size > 0)
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">@FormatSize(key.Size, key.Type)</MudChip>
+                                                }
+                                                @if (key.Ttl.HasValue)
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">TTL: @FormatTtl(key.Ttl.Value)</MudChip>
+                                                }
+                                            </div>
                                         </div>
                                     </div>
                                 </Virtualize>
@@ -199,24 +305,28 @@
                             else
                             {
                                 <Virtualize Items="_hashKeys" Context="key" ItemSize="72" OverscanCount="3">
-                                    <div @onclick="() => SelectKey(key)"
-                                         style="padding: 12px 16px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.1); height: 72px; box-sizing: border-box;
-                                                background: @(_selectedKey?.Key == key.Key ? "rgba(244, 67, 54, 0.2)" : "transparent");
+                                    <div style="display: flex; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); height: 72px; box-sizing: border-box;
+                                                background: @(_selectedKey?.Key == key.Key ? "rgba(244, 67, 54, 0.2)" : (_selectedKeys.Contains(key.Key) ? "rgba(244, 67, 54, 0.1)" : "transparent"));
                                                 border-left: 3px solid @(_selectedKey?.Key == key.Key ? "#f44336" : "transparent");"
                                          class="key-item">
-                                        <div style="font-family: 'Consolas', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px;">
-                                            @key.Key
-                                        </div>
-                                        <div style="display: flex; gap: 6px; margin-top: 8px;">
-                                            <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled" Style="height: 20px; font-size: 10px;">Hash</MudChip>
-                                            @if (key.Size > 0)
-                                            {
-                                                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">@FormatSize(key.Size, key.Type)</MudChip>
-                                            }
-                                            @if (key.Ttl.HasValue)
-                                            {
-                                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">TTL: @FormatTtl(key.Ttl.Value)</MudChip>
-                                            }
+                                        <MudCheckBox T="bool" Value="_selectedKeys.Contains(key.Key)"
+                                                     ValueChanged="@((bool v) => ToggleKeySelection(key.Key))"
+                                                     Size="Size.Small" Class="ml-2" Style="margin-top: -4px;" />
+                                        <div @onclick="() => SelectKey(key)" style="flex: 1; padding: 12px 16px 12px 0; cursor: pointer;">
+                                            <div style="font-family: 'Consolas', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px;">
+                                                @key.Key
+                                            </div>
+                                            <div style="display: flex; gap: 6px; margin-top: 8px;">
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled" Style="height: 20px; font-size: 10px;">Hash</MudChip>
+                                                @if (key.Size > 0)
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">@FormatSize(key.Size, key.Type)</MudChip>
+                                                }
+                                                @if (key.Ttl.HasValue)
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">TTL: @FormatTtl(key.Ttl.Value)</MudChip>
+                                                }
+                                            </div>
                                         </div>
                                     </div>
                                 </Virtualize>
@@ -243,29 +353,34 @@
                             else
                             {
                                 <Virtualize Items="_otherKeys" Context="key" ItemSize="72" OverscanCount="3">
-                                    <div @onclick="() => SelectKey(key)"
-                                         style="padding: 12px 16px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.1); height: 72px; box-sizing: border-box;
-                                                background: @(_selectedKey?.Key == key.Key ? "rgba(156, 39, 176, 0.2)" : "transparent");
+                                    <div style="display: flex; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); height: 72px; box-sizing: border-box;
+                                                background: @(_selectedKey?.Key == key.Key ? "rgba(156, 39, 176, 0.2)" : (_selectedKeys.Contains(key.Key) ? "rgba(156, 39, 176, 0.1)" : "transparent"));
                                                 border-left: 3px solid @(_selectedKey?.Key == key.Key ? "#9c27b0" : "transparent");"
                                          class="key-item">
-                                        <div style="font-family: 'Consolas', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px;">
-                                            @key.Key
-                                        </div>
-                                        <div style="display: flex; gap: 6px; margin-top: 8px;">
-                                            <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(key.Type)" Variant="Variant.Filled" Style="height: 20px; font-size: 10px;">@key.Type</MudChip>
-                                            @if (key.Size > 0)
-                                            {
-                                                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">@FormatSize(key.Size, key.Type)</MudChip>
-                                            }
-                                            @if (key.Ttl.HasValue)
-                                            {
-                                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">TTL: @FormatTtl(key.Ttl.Value)</MudChip>
-                                            }
+                                        <MudCheckBox T="bool" Value="_selectedKeys.Contains(key.Key)"
+                                                     ValueChanged="@((bool v) => ToggleKeySelection(key.Key))"
+                                                     Size="Size.Small" Class="ml-2" Style="margin-top: -4px;" />
+                                        <div @onclick="() => SelectKey(key)" style="flex: 1; padding: 12px 16px 12px 0; cursor: pointer;">
+                                            <div style="font-family: 'Consolas', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px;">
+                                                @key.Key
+                                            </div>
+                                            <div style="display: flex; gap: 6px; margin-top: 8px;">
+                                                <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(key.Type)" Variant="Variant.Filled" Style="height: 20px; font-size: 10px;">@key.Type</MudChip>
+                                                @if (key.Size > 0)
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">@FormatSize(key.Size, key.Type)</MudChip>
+                                                }
+                                                @if (key.Ttl.HasValue)
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Style="height: 20px; font-size: 10px;">TTL: @FormatTtl(key.Ttl.Value)</MudChip>
+                                                }
+                                            </div>
                                         </div>
                                     </div>
                                 </Virtualize>
                             }
                         </div>
+                    }
                     }
                 </MudPaper>
 
@@ -273,17 +388,27 @@
                 <MudPaper Elevation="2" Style="flex: 1; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden; min-width: 0;">
                     @if (_selectedKey != null)
                     {
-                        <div style="padding: 12px 16px; background: var(--mud-palette-surface); border-bottom: 1px solid var(--mud-palette-divider); display: flex; align-items: center; gap: 12px;">
+                        <div style="padding: 12px 16px; background: var(--mud-palette-surface); border-bottom: 1px solid var(--mud-palette-divider); display: flex; align-items: center; gap: 8px;">
                             <MudText Typo="Typo.subtitle1" Style="font-family: 'Consolas', monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                                 @_selectedKey.Key
                             </MudText>
                             <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(_selectedKey.Type)" Variant="Variant.Filled">
                                 @_selectedKey.Type
                             </MudChip>
-                            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small"
-                                           OnClick="CopyValue" Color="Color.Primary" />
-                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
-                                           OnClick="DeleteSelectedKey" Color="Color.Error" />
+                            @if (_selectedKey.Ttl.HasValue)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">
+                                    TTL: @FormatTtl(_selectedKey.Ttl.Value)
+                                </MudChip>
+                            }
+                            <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" AnchorOrigin="Origin.BottomRight">
+                                <MudMenuItem Icon="@Icons.Material.Filled.Timer" OnClick="OpenTtlDialog">Set TTL</MudMenuItem>
+                                <MudMenuItem Icon="@Icons.Material.Filled.DriveFileRenameOutline" OnClick="OpenRenameDialog">Rename</MudMenuItem>
+                                <MudMenuItem Icon="@Icons.Material.Filled.ContentCopy" OnClick="OpenDuplicateDialog">Duplicate</MudMenuItem>
+                                <MudMenuItem Icon="@Icons.Material.Filled.FileDownload" OnClick="ExportKey">Export JSON</MudMenuItem>
+                                <MudDivider />
+                                <MudMenuItem Icon="@Icons.Material.Filled.Delete" IconColor="Color.Error" OnClick="RequestDeleteSelectedKey">Delete</MudMenuItem>
+                            </MudMenu>
                         </div>
 
                         <div style="flex: 1; overflow: auto; padding: 16px;">
@@ -352,7 +477,10 @@
                                         break;
 
                                     case "List":
-                                        <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                @(_selectedValue.ListValue?.Count ?? 0) items
+                                            </MudText>
                                             <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
                                                        StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAddListItemDialog">
                                                 Add Item
@@ -367,10 +495,10 @@
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                @for (int i = 0; i < _selectedValue.ListValue?.Count; i++)
+                                                @{ var listStartIndex = (_currentPage - 1) * _pageSize; }
+                                                @foreach (var (value, idx) in GetPagedItems(_selectedValue.ListValue?.Select((v, i) => (v, i)))!)
                                                 {
-                                                    var index = i;
-                                                    var value = _selectedValue.ListValue[index];
+                                                    var index = idx;
                                                     <tr>
                                                         <td><MudChip T="string" Size="Size.Small" Color="Color.Success">@index</MudChip></td>
                                                         <td style="font-family: 'Consolas', monospace;">
@@ -415,10 +543,27 @@
                                                 }
                                             </tbody>
                                         </MudSimpleTable>
+                                        @if (TotalPages > 1)
+                                        {
+                                            <div style="display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 12px;">
+                                                <MudIconButton Icon="@Icons.Material.Filled.FirstPage" Size="Size.Small"
+                                                               Disabled="_currentPage <= 1" OnClick="() => GoToPage(1)" />
+                                                <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small"
+                                                               Disabled="_currentPage <= 1" OnClick="() => GoToPage(_currentPage - 1)" />
+                                                <MudText Typo="Typo.body2">Page @_currentPage / @TotalPages</MudText>
+                                                <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small"
+                                                               Disabled="_currentPage >= TotalPages" OnClick="() => GoToPage(_currentPage + 1)" />
+                                                <MudIconButton Icon="@Icons.Material.Filled.LastPage" Size="Size.Small"
+                                                               Disabled="_currentPage >= TotalPages" OnClick="() => GoToPage(TotalPages)" />
+                                            </div>
+                                        }
                                         break;
 
                                     case "Set":
-                                        <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                @(_selectedValue.SetValue?.Count ?? 0) members
+                                            </MudText>
                                             <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
                                                        StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAddSetMemberDialog">
                                                 Add Member
@@ -432,7 +577,7 @@
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                @foreach (var member in _selectedValue.SetValue ?? [])
+                                                @foreach (var member in GetPagedItems(_selectedValue.SetValue))
                                                 {
                                                     <tr>
                                                         <td style="font-family: 'Consolas', monospace;">@member</td>
@@ -444,10 +589,27 @@
                                                 }
                                             </tbody>
                                         </MudSimpleTable>
+                                        @if (TotalPages > 1)
+                                        {
+                                            <div style="display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 12px;">
+                                                <MudIconButton Icon="@Icons.Material.Filled.FirstPage" Size="Size.Small"
+                                                               Disabled="_currentPage <= 1" OnClick="() => GoToPage(1)" />
+                                                <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small"
+                                                               Disabled="_currentPage <= 1" OnClick="() => GoToPage(_currentPage - 1)" />
+                                                <MudText Typo="Typo.body2">Page @_currentPage / @TotalPages</MudText>
+                                                <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small"
+                                                               Disabled="_currentPage >= TotalPages" OnClick="() => GoToPage(_currentPage + 1)" />
+                                                <MudIconButton Icon="@Icons.Material.Filled.LastPage" Size="Size.Small"
+                                                               Disabled="_currentPage >= TotalPages" OnClick="() => GoToPage(TotalPages)" />
+                                            </div>
+                                        }
                                         break;
 
                                     case "SortedSet":
-                                        <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                @(_selectedValue.SortedSetValue?.Count ?? 0) members
+                                            </MudText>
                                             <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
                                                        StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAddSortedSetMemberDialog">
                                                 Add Member
@@ -462,7 +624,7 @@
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                @foreach (var entry in _selectedValue.SortedSetValue ?? [])
+                                                @foreach (var entry in GetPagedItems(_selectedValue.SortedSetValue))
                                                 {
                                                     <tr>
                                                         <td>
@@ -498,10 +660,27 @@
                                                 }
                                             </tbody>
                                         </MudSimpleTable>
+                                        @if (TotalPages > 1)
+                                        {
+                                            <div style="display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 12px;">
+                                                <MudIconButton Icon="@Icons.Material.Filled.FirstPage" Size="Size.Small"
+                                                               Disabled="_currentPage <= 1" OnClick="() => GoToPage(1)" />
+                                                <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small"
+                                                               Disabled="_currentPage <= 1" OnClick="() => GoToPage(_currentPage - 1)" />
+                                                <MudText Typo="Typo.body2">Page @_currentPage / @TotalPages</MudText>
+                                                <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small"
+                                                               Disabled="_currentPage >= TotalPages" OnClick="() => GoToPage(_currentPage + 1)" />
+                                                <MudIconButton Icon="@Icons.Material.Filled.LastPage" Size="Size.Small"
+                                                               Disabled="_currentPage >= TotalPages" OnClick="() => GoToPage(TotalPages)" />
+                                            </div>
+                                        }
                                         break;
 
                                     case "Hash":
-                                        <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                @(_selectedValue.HashValue?.Count ?? 0) fields
+                                            </MudText>
                                             <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
                                                        StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAddHashFieldDialog">
                                                 Add Field
@@ -516,7 +695,7 @@
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                @foreach (var kvp in _selectedValue.HashValue ?? new Dictionary<string, string>())
+                                                @foreach (var kvp in GetPagedItems(_selectedValue.HashValue))
                                                 {
                                                     <tr>
                                                         <td style="vertical-align: top;"><MudChip T="string" Size="Size.Small" Color="Color.Error">@kvp.Key</MudChip></td>
@@ -569,6 +748,20 @@
                                                 }
                                             </tbody>
                                         </MudSimpleTable>
+                                        @if (TotalPages > 1)
+                                        {
+                                            <div style="display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 12px;">
+                                                <MudIconButton Icon="@Icons.Material.Filled.FirstPage" Size="Size.Small"
+                                                               Disabled="_currentPage <= 1" OnClick="() => GoToPage(1)" />
+                                                <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small"
+                                                               Disabled="_currentPage <= 1" OnClick="() => GoToPage(_currentPage - 1)" />
+                                                <MudText Typo="Typo.body2">Page @_currentPage / @TotalPages</MudText>
+                                                <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small"
+                                                               Disabled="_currentPage >= TotalPages" OnClick="() => GoToPage(_currentPage + 1)" />
+                                                <MudIconButton Icon="@Icons.Material.Filled.LastPage" Size="Size.Small"
+                                                               Disabled="_currentPage >= TotalPages" OnClick="() => GoToPage(TotalPages)" />
+                                            </div>
+                                        }
                                         break;
 
                                     default:
@@ -778,6 +971,154 @@
     </DialogActions>
 </MudDialog>
 
+@* TTL Dialog *@
+<MudDialog @bind-Visible="_showTtlDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Timer" Class="mr-2" />
+            Set TTL for @_selectedKey?.Key
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+            @if (_selectedKey?.Ttl.HasValue == true)
+            {
+                <MudAlert Severity="Severity.Info">Current TTL: @FormatTtl(_selectedKey.Ttl.Value)</MudAlert>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Info">No TTL set (key persists forever)</MudAlert>
+            }
+            <div style="display: flex; gap: 12px; align-items: flex-end;">
+                <MudNumericField @bind-Value="_ttlValue" Label="Duration" Variant="Variant.Outlined" Min="0" Style="flex: 1;" />
+                <MudSelect @bind-Value="_ttlUnit" Label="Unit" Variant="Variant.Outlined" Style="width: 150px;">
+                    <MudSelectItem Value="@("seconds")">Seconds</MudSelectItem>
+                    <MudSelectItem Value="@("minutes")">Minutes</MudSelectItem>
+                    <MudSelectItem Value="@("hours")">Hours</MudSelectItem>
+                    <MudSelectItem Value="@("days")">Days</MudSelectItem>
+                </MudSelect>
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showTtlDialog = false" Disabled="_isSavingTtl">Cancel</MudButton>
+        <MudButton Color="Color.Warning" Variant="Variant.Outlined" OnClick="RemoveTtl" Disabled="_isSavingTtl || _selectedKey?.Ttl == null">
+            Remove TTL
+        </MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveTtl" Disabled="_isSavingTtl || _ttlValue <= 0">
+            @if (_isSavingTtl) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            Set TTL
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Rename Dialog *@
+<MudDialog @bind-Visible="_showRenameDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.DriveFileRenameOutline" Class="mr-2" />
+            Rename Key
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+            <MudTextField Value="@_selectedKey?.Key" Label="Current Name" Variant="Variant.Outlined" ReadOnly="true" />
+            <MudTextField @bind-Value="_renameNewKey" Label="New Name" Variant="Variant.Outlined" Required="true" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showRenameDialog = false" Disabled="_isRenaming">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="RenameKey" Disabled="_isRenaming || string.IsNullOrWhiteSpace(_renameNewKey)">
+            @if (_isRenaming) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            Rename
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Duplicate Dialog *@
+<MudDialog @bind-Visible="_showDuplicateDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.ContentCopy" Class="mr-2" />
+            Duplicate Key
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+            <MudTextField Value="@_selectedKey?.Key" Label="Source Key" Variant="Variant.Outlined" ReadOnly="true" />
+            <MudTextField @bind-Value="_duplicateNewKey" Label="New Key Name" Variant="Variant.Outlined" Required="true" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showDuplicateDialog = false" Disabled="_isDuplicating">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="DuplicateKey" Disabled="_isDuplicating || string.IsNullOrWhiteSpace(_duplicateNewKey)">
+            @if (_isDuplicating) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            Duplicate
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Export Dialog *@
+<MudDialog @bind-Visible="_showExportDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.FileDownload" Class="mr-2" />
+            Export Key
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_exportJson" Label="JSON Export" Variant="Variant.Outlined" Lines="15" ReadOnly="true"
+                      Style="font-family: 'Consolas', monospace; font-size: 12px;" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showExportDialog = false">Close</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="CopyExportToClipboard"
+                   StartIcon="@Icons.Material.Filled.ContentCopy">
+            Copy to Clipboard
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Import Dialog *@
+<MudDialog @bind-Visible="_showImportDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.FileUpload" Class="mr-2" />
+            Import Key
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_importJson" Label="Paste JSON here" Variant="Variant.Outlined" Lines="15"
+                      Style="font-family: 'Consolas', monospace; font-size: 12px;"
+                      Placeholder='{"Key": "mykey", "Type": "String", "Value": "myvalue"}' />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showImportDialog = false" Disabled="_isImporting">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ImportKey" Disabled="_isImporting || string.IsNullOrWhiteSpace(_importJson)">
+            @if (_isImporting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            Import
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Confirm Delete Dialog *@
+<MudDialog @bind-Visible="_showConfirmDeleteDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Small }">
+    <TitleContent>
+        <MudText Typo="Typo.h6" Color="Color.Error">
+            <MudIcon Icon="@Icons.Material.Filled.Warning" Class="mr-2" />
+            Confirm Deletion
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText>@_deleteConfirmText</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2">This action cannot be undone.</MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CancelDelete">Cancel</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="ConfirmDelete">Delete</MudButton>
+    </DialogActions>
+</MudDialog>
+
 <footer style="position: fixed; bottom: 0; left: 0; right: 0; padding: 8px 16px; background: linear-gradient(90deg, #1a1a2e 0%, #16213e 100%); text-align: center; z-index: 1000;">
     <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.7);">
         Developed by <a href="https://github.com/0xZunia/" target="_blank" style="color: #e94560; font-weight: bold; text-decoration: none;">Reyan CARLIER</a>
@@ -882,6 +1223,54 @@
     private string? _editingSortedSetMember;
     private double _editSortedSetScore;
     private bool _isSavingSortedSetMember;
+
+    // TTL Dialog
+    private bool _showTtlDialog;
+    private int _ttlValue;
+    private string _ttlUnit = "seconds";
+    private bool _isSavingTtl;
+
+    // Rename Dialog
+    private bool _showRenameDialog;
+    private string _renameNewKey = "";
+    private bool _isRenaming;
+
+    // Duplicate Dialog
+    private bool _showDuplicateDialog;
+    private string _duplicateNewKey = "";
+    private bool _isDuplicating;
+
+    // Export/Import
+    private bool _showExportDialog;
+    private string _exportJson = "";
+    private bool _showImportDialog;
+    private string _importJson = "";
+    private bool _isImporting;
+
+    // Confirm Delete Dialog
+    private bool _showConfirmDeleteDialog;
+    private string _deleteConfirmText = "";
+    private Action? _pendingDeleteAction;
+
+    // Multi-selection
+    private HashSet<string> _selectedKeys = new();
+
+    // Search in values
+    private bool _searchInValues;
+    private bool _isSearchingValues;
+
+    // Tree view
+    private bool _showTreeView;
+    private List<NamespaceGroup> _namespaceGroups = new();
+    private const int MaxKeysPerNamespace = 100;
+
+    // Pagination
+    private int _pageSize = 50;
+    private int _currentPage = 1;
+    private int TotalPages => _selectedValue == null ? 1 : GetTotalItems() / _pageSize + (GetTotalItems() % _pageSize > 0 ? 1 : 0);
+
+    // Connection history
+    private List<ConnectionHistory> _connectionHistory = new();
 
     // Connection settings
     private string _connectionHost = "localhost";
@@ -1049,13 +1438,21 @@
     private async Task OnPatternChanged(string pattern)
     {
         _searchPattern = string.IsNullOrWhiteSpace(pattern) ? "*" : pattern;
-        await RefreshKeys();
+        if (_searchInValues && _searchPattern != "*")
+        {
+            await SearchInValuesAsync();
+        }
+        else
+        {
+            await RefreshKeys();
+        }
     }
 
     private async Task SelectKey(RedisKeyInfo key)
     {
         _selectedKey = key;
         _isLoadingValue = true;
+        _currentPage = 1; // Reset pagination
         StateHasChanged();
 
         try
@@ -1106,6 +1503,24 @@
         "Stream" => Color.Secondary,
         _ => Color.Default
     };
+
+    private string GetTypeIcon(string type) => type switch
+    {
+        "String" => Icons.Material.Filled.TextFields,
+        "List" => Icons.Material.Filled.List,
+        "Set" => Icons.Material.Filled.Category,
+        "SortedSet" => Icons.Material.Filled.Sort,
+        "Hash" => Icons.Material.Filled.Tag,
+        "Stream" => Icons.Material.Filled.Stream,
+        _ => Icons.Material.Filled.Key
+    };
+
+    private string GetKeyDisplayName(string fullKey, string ns)
+    {
+        if (ns == "(root)" || !fullKey.StartsWith(ns + ":"))
+            return fullKey;
+        return fullKey.Substring(ns.Length + 1);
+    }
 
     private string FormatTtl(TimeSpan ttl)
     {
@@ -1566,6 +1981,403 @@
         {
             Snackbar.Add($"Error: {ex.Message}", Severity.Error);
         }
+    }
+
+    // TTL Management
+    private void OpenTtlDialog()
+    {
+        if (_selectedKey == null) return;
+        _ttlValue = _selectedKey.Ttl.HasValue ? (int)_selectedKey.Ttl.Value.TotalSeconds : 3600;
+        _ttlUnit = "seconds";
+        _showTtlDialog = true;
+    }
+
+    private async Task SaveTtl()
+    {
+        if (_selectedKey == null || _ttlValue <= 0) return;
+
+        _isSavingTtl = true;
+        StateHasChanged();
+
+        try
+        {
+            var expiry = _ttlUnit switch
+            {
+                "minutes" => TimeSpan.FromMinutes(_ttlValue),
+                "hours" => TimeSpan.FromHours(_ttlValue),
+                "days" => TimeSpan.FromDays(_ttlValue),
+                _ => TimeSpan.FromSeconds(_ttlValue)
+            };
+
+            await Redis.SetKeyExpireAsync(_selectedKey.Key, expiry);
+            _selectedKey.Ttl = expiry;
+            _showTtlDialog = false;
+            Snackbar.Add("TTL set successfully", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSavingTtl = false;
+        }
+    }
+
+    private async Task RemoveTtl()
+    {
+        if (_selectedKey == null) return;
+
+        _isSavingTtl = true;
+        StateHasChanged();
+
+        try
+        {
+            await Redis.SetKeyExpireAsync(_selectedKey.Key, null);
+            _selectedKey.Ttl = null;
+            _showTtlDialog = false;
+            Snackbar.Add("TTL removed", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSavingTtl = false;
+        }
+    }
+
+    // Rename key
+    private void OpenRenameDialog()
+    {
+        if (_selectedKey == null) return;
+        _renameNewKey = _selectedKey.Key;
+        _showRenameDialog = true;
+    }
+
+    private async Task RenameKey()
+    {
+        if (_selectedKey == null || string.IsNullOrWhiteSpace(_renameNewKey)) return;
+        if (_renameNewKey == _selectedKey.Key)
+        {
+            _showRenameDialog = false;
+            return;
+        }
+
+        _isRenaming = true;
+        StateHasChanged();
+
+        try
+        {
+            await Redis.RenameKeyAsync(_selectedKey.Key, _renameNewKey);
+            _showRenameDialog = false;
+            Snackbar.Add("Key renamed successfully", Severity.Success);
+            await RefreshKeys();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isRenaming = false;
+        }
+    }
+
+    // Duplicate key
+    private void OpenDuplicateDialog()
+    {
+        if (_selectedKey == null) return;
+        _duplicateNewKey = _selectedKey.Key + "_copy";
+        _showDuplicateDialog = true;
+    }
+
+    private async Task DuplicateKey()
+    {
+        if (_selectedKey == null || string.IsNullOrWhiteSpace(_duplicateNewKey)) return;
+
+        _isDuplicating = true;
+        StateHasChanged();
+
+        try
+        {
+            var exists = await Redis.KeyExistsAsync(_duplicateNewKey);
+            if (exists)
+            {
+                Snackbar.Add("Target key already exists", Severity.Warning);
+                return;
+            }
+
+            await Redis.DuplicateKeyAsync(_selectedKey.Key, _duplicateNewKey);
+            _showDuplicateDialog = false;
+            Snackbar.Add("Key duplicated successfully", Severity.Success);
+            await RefreshKeys();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isDuplicating = false;
+        }
+    }
+
+    // Export/Import
+    private async Task ExportKey()
+    {
+        if (_selectedKey == null) return;
+
+        try
+        {
+            _exportJson = await Redis.ExportKeyToJsonAsync(_selectedKey.Key);
+            _showExportDialog = true;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error exporting: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void CopyExportToClipboard()
+    {
+        Snackbar.Add("JSON copied to clipboard", Severity.Success);
+    }
+
+    private async Task ImportKey()
+    {
+        if (string.IsNullOrWhiteSpace(_importJson)) return;
+
+        _isImporting = true;
+        StateHasChanged();
+
+        try
+        {
+            var success = await Redis.ImportKeyFromJsonAsync(_importJson);
+            if (success)
+            {
+                _showImportDialog = false;
+                _importJson = "";
+                Snackbar.Add("Key imported successfully", Severity.Success);
+                await RefreshKeys();
+            }
+            else
+            {
+                Snackbar.Add("Failed to import key - invalid JSON format", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error importing: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isImporting = false;
+        }
+    }
+
+    // Confirm delete methods
+    private void RequestDeleteSelectedKey()
+    {
+        if (_selectedKey == null) return;
+        _deleteConfirmText = $"Are you sure you want to delete the key '{_selectedKey.Key}'?";
+        _pendingDeleteAction = async () => await DeleteSelectedKeyConfirmed();
+        _showConfirmDeleteDialog = true;
+    }
+
+    private void RequestDeleteSelectedKeys()
+    {
+        if (_selectedKeys.Count == 0) return;
+        _deleteConfirmText = $"Are you sure you want to delete {_selectedKeys.Count} selected keys?";
+        _pendingDeleteAction = async () => await DeleteSelectedKeysConfirmed();
+        _showConfirmDeleteDialog = true;
+    }
+
+    private void CancelDelete()
+    {
+        _showConfirmDeleteDialog = false;
+        _pendingDeleteAction = null;
+    }
+
+    private async void ConfirmDelete()
+    {
+        _showConfirmDeleteDialog = false;
+        _pendingDeleteAction?.Invoke();
+        _pendingDeleteAction = null;
+        await Task.CompletedTask;
+    }
+
+    private async Task DeleteSelectedKeyConfirmed()
+    {
+        if (_selectedKey == null) return;
+
+        try
+        {
+            await Redis.DeleteKeyAsync(_selectedKey.Key);
+            Snackbar.Add("Key deleted", Severity.Success);
+            _keys.Remove(_selectedKey);
+            _stringKeys.Remove(_selectedKey);
+            _hashKeys.Remove(_selectedKey);
+            _otherKeys.Remove(_selectedKey);
+            _selectedKey = null;
+            _selectedValue = null;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DeleteSelectedKeysConfirmed()
+    {
+        if (_selectedKeys.Count == 0) return;
+
+        try
+        {
+            var count = await Redis.DeleteKeysAsync(_selectedKeys);
+            Snackbar.Add($"{count} keys deleted", Severity.Success);
+            _selectedKeys.Clear();
+            await RefreshKeys();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // Multi-selection
+    private void ToggleKeySelection(string key)
+    {
+        if (_selectedKeys.Contains(key))
+            _selectedKeys.Remove(key);
+        else
+            _selectedKeys.Add(key);
+    }
+
+    // Search in values
+    private async Task SearchInValuesAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_searchPattern) || _searchPattern == "*") return;
+
+        await CancelStreamingAsync();
+
+        _keys = [];
+        _stringKeys = [];
+        _hashKeys = [];
+        _otherKeys = [];
+        _selectedKey = null;
+        _selectedValue = null;
+        _isSearchingValues = true;
+        _streamCts = new CancellationTokenSource();
+
+        StateHasChanged();
+
+        var tempKeys = new List<RedisKeyInfo>();
+
+        try
+        {
+            await foreach (var key in Redis.SearchInValuesAsync(_searchPattern, _streamCts.Token))
+            {
+                if (_streamCts.Token.IsCancellationRequested)
+                    break;
+
+                tempKeys.Add(key);
+
+                if (tempKeys.Count % 100 == 0)
+                {
+                    UpdateFilteredLists(tempKeys);
+                    StateHasChanged();
+                    await Task.Delay(1);
+                }
+            }
+
+            UpdateFilteredLists(tempKeys);
+            Snackbar.Add($"Found {_keys.Count:N0} matching keys", Severity.Success);
+        }
+        catch (OperationCanceledException)
+        {
+            UpdateFilteredLists(tempKeys);
+            Snackbar.Add($"Search stopped at {_keys.Count:N0} keys", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSearchingValues = false;
+            StateHasChanged();
+        }
+    }
+
+    // Tree view
+    private void ToggleTreeView()
+    {
+        _showTreeView = !_showTreeView;
+        if (_showTreeView)
+        {
+            BuildTreeView();
+        }
+    }
+
+    private void BuildTreeView()
+    {
+        // Group keys by namespace efficiently
+        var groups = _keys
+            .GroupBy(k => {
+                var idx = k.Key.IndexOf(':');
+                return idx > 0 ? k.Key.Substring(0, idx) : "(root)";
+            })
+            .Select(g => new NamespaceGroup
+            {
+                Name = g.Key,
+                TotalCount = g.Count(),
+                Keys = g.Take(MaxKeysPerNamespace).ToList()
+            })
+            .OrderBy(g => g.Name)
+            .ToList();
+
+        _namespaceGroups = groups;
+    }
+
+    public class NamespaceGroup
+    {
+        public string Name { get; set; } = "";
+        public int TotalCount { get; set; }
+        public List<RedisKeyInfo> Keys { get; set; } = new();
+        public bool IsExpanded { get; set; }
+    }
+
+    // Pagination methods
+    private int GetTotalItems()
+    {
+        if (_selectedValue == null) return 0;
+        return _selectedValue.Type switch
+        {
+            "List" => _selectedValue.ListValue?.Count ?? 0,
+            "Set" => _selectedValue.SetValue?.Count ?? 0,
+            "SortedSet" => _selectedValue.SortedSetValue?.Count ?? 0,
+            "Hash" => _selectedValue.HashValue?.Count ?? 0,
+            _ => 0
+        };
+    }
+
+    private IEnumerable<T> GetPagedItems<T>(IEnumerable<T>? items)
+    {
+        if (items == null) return [];
+        return items.Skip((_currentPage - 1) * _pageSize).Take(_pageSize);
+    }
+
+    private void GoToPage(int page)
+    {
+        _currentPage = Math.Max(1, Math.Min(page, TotalPages));
+    }
+
+    private void ResetPagination()
+    {
+        _currentPage = 1;
     }
 
     public void Dispose()

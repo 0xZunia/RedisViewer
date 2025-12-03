@@ -3,6 +3,7 @@
 @using System.Text.Json
 @inject RedisService Redis
 @inject ISnackbar Snackbar
+@inject IJSRuntime JS
 @rendermode InteractiveServer
 @implements IDisposable
 
@@ -35,11 +36,31 @@
 
     @if (Redis.IsConnected)
     {
+        <MudSelect T="int" Value="_selectedDatabase" ValueChanged="ChangeDatabase" Dense="true"
+                   Variant="Variant.Outlined" Style="width: 80px; margin-right: 8px;"
+                   AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter">
+            @for (int i = 0; i < 16; i++)
+            {
+                var db = i;
+                <MudSelectItem Value="db">DB @db</MudSelectItem>
+            }
+        </MudSelect>
+
         <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">
             @Redis.CurrentHost:@Redis.CurrentPort
         </MudChip>
         <MudIconButton Icon="@Icons.Material.Filled.LinkOff" Color="Color.Error" Size="Size.Small"
                        OnClick="Disconnect" Class="ml-2" />
+
+        <MudMenu Icon="@Icons.Material.Filled.Insights" Color="Color.Inherit" Size="Size.Small"
+                 AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter">
+            <MudMenuItem Icon="@Icons.Material.Filled.Analytics" OnClick="LoadStats">Statistics</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.Speed" OnClick="LoadSlowLog">Slow Log</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.People" OnClick="LoadClientList">Clients</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.Terminal" OnClick="() => _showConsoleDrawer = true">Console</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.Podcasts" OnClick="() => _showPubSubDialog = true">Pub/Sub</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.Compare" OnClick="() => _showCompareDialog = true">Compare Keys</MudMenuItem>
+        </MudMenu>
     }
     else
     {
@@ -86,6 +107,13 @@
                                        OnClick="ToggleTreeView" />
                     </MudTooltip>
 
+                    <MudTooltip Text="Show favorites only">
+                        <MudIconButton Icon="@(_showFavoritesOnly ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarBorder)"
+                                       Color="@(_showFavoritesOnly ? Color.Warning : Color.Default)"
+                                       Size="Size.Small"
+                                       OnClick="() => _showFavoritesOnly = !_showFavoritesOnly" />
+                    </MudTooltip>
+
                     <MudDivider Vertical="true" FlexItem="true" />
 
                     <MudButtonGroup Variant="Variant.Filled" Size="Size.Small" OverrideStyles="false">
@@ -112,11 +140,16 @@
 
                     @if (_selectedKeys.Count > 0)
                     {
-                        <MudButton Color="Color.Error" Variant="Variant.Filled" Size="Size.Small"
-                                   StartIcon="@Icons.Material.Filled.DeleteSweep"
-                                   OnClick="RequestDeleteSelectedKeys">
-                            Delete (@_selectedKeys.Count)
-                        </MudButton>
+                        <MudButtonGroup Variant="Variant.Filled" Size="Size.Small" OverrideStyles="false">
+                            <MudButton Color="Color.Warning" StartIcon="@Icons.Material.Filled.Timer"
+                                       OnClick="OpenBulkTtlDialog">
+                                TTL (@_selectedKeys.Count)
+                            </MudButton>
+                            <MudButton Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteSweep"
+                                       OnClick="RequestDeleteSelectedKeys">
+                                Delete (@_selectedKeys.Count)
+                            </MudButton>
+                        </MudButtonGroup>
                     }
 
                     <div style="display: flex; align-items: center; gap: 8px;">
@@ -401,6 +434,15 @@
                                     TTL: @FormatTtl(_selectedKey.Ttl.Value)
                                 </MudChip>
                             }
+                            <MudTooltip Text="@(IsFavorite(_selectedKey.Key) ? "Remove from favorites" : "Add to favorites")">
+                                <MudIconButton Icon="@(IsFavorite(_selectedKey.Key) ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarBorder)"
+                                               Color="@(IsFavorite(_selectedKey.Key) ? Color.Warning : Color.Default)"
+                                               Size="Size.Small" OnClick="() => ToggleFavorite(_selectedKey.Key)" />
+                            </MudTooltip>
+                            <MudTooltip Text="Copy key name">
+                                <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small"
+                                               OnClick="() => CopyToClipboard(_selectedKey.Key)" />
+                            </MudTooltip>
                             <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" AnchorOrigin="Origin.BottomRight">
                                 <MudMenuItem Icon="@Icons.Material.Filled.Timer" OnClick="OpenTtlDialog">Set TTL</MudMenuItem>
                                 <MudMenuItem Icon="@Icons.Material.Filled.DriveFileRenameOutline" OnClick="OpenRenameDialog">Rename</MudMenuItem>
@@ -456,6 +498,10 @@
                                                         JSON
                                                     </MudChip>
                                                 }
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                                                           StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="() => CopyToClipboard(_selectedValue.Value ?? string.Empty)">
+                                                    Copy
+                                                </MudButton>
                                                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
                                                            StartIcon="@Icons.Material.Filled.Edit" OnClick="StartEditingString">
                                                     Edit
@@ -463,8 +509,8 @@
                                             </div>
                                             @if (IsJson(_selectedValue.Value))
                                             {
-                                                <MudPaper Outlined="true" Class="pa-4" Style="background: #1e1e1e; border-radius: 8px; overflow: auto;">
-                                                    <pre style="margin: 0; white-space: pre; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.5;">@FormatJson(_selectedValue.Value)</pre>
+                                                <MudPaper Outlined="true" Class="pa-4" Style="background: #1e1e2d; border-radius: 8px; overflow: auto; max-height: 500px;">
+                                                    <pre style="margin: 0; white-space: pre-wrap; word-break: break-word; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 13px; line-height: 1.6; color: #d4d4d4;">@((MarkupString)FormatJsonWithHighlighting(_selectedValue.Value))</pre>
                                                 </MudPaper>
                                             }
                                             else
@@ -728,7 +774,7 @@
                                                                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
                                                                     <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">JSON</MudChip>
                                                                 </div>
-                                                                <pre style="margin: 0; white-space: pre; background: #1e1e1e; padding: 8px; border-radius: 4px; overflow: auto; max-height: 300px;">@FormatJson(kvp.Value)</pre>
+                                                                <pre style="margin: 0; white-space: pre-wrap; word-break: break-word; background: #1e1e2d; padding: 12px; border-radius: 4px; overflow: auto; max-height: 300px; font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; line-height: 1.5; color: #d4d4d4;">@((MarkupString)FormatJsonWithHighlighting(kvp.Value))</pre>
                                                             }
                                                             else
                                                             {
@@ -823,21 +869,28 @@
                                   OnAdornmentClick="() => _showPassword = !_showPassword"
                                   InputType="@(_showPassword ? InputType.Text : InputType.Password)" />
 
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
-                               StartIcon="@(_isConnecting ? null : Icons.Material.Filled.Link)"
-                               OnClick="Connect" Disabled="_isConnecting || string.IsNullOrWhiteSpace(_connectionHost)"
-                               Style="border-radius: 8px; text-transform: none; font-weight: 600; margin-top: 8px;"
-                               FullWidth="true">
-                        @if (_isConnecting)
-                        {
-                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" Color="Color.Inherit" />
-                            <span>Connecting...</span>
-                        }
-                        else
-                        {
-                            <span>Connect</span>
-                        }
-                    </MudButton>
+                    <div style="display: flex; gap: 12px; margin-top: 8px;">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Large"
+                                   StartIcon="@Icons.Material.Filled.AccountCircle"
+                                   OnClick="() => _showProfilesDialog = true"
+                                   Style="border-radius: 8px; text-transform: none; font-weight: 600; flex: 1;">
+                            Profiles
+                        </MudButton>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                                   StartIcon="@(_isConnecting ? null : Icons.Material.Filled.Link)"
+                                   OnClick="Connect" Disabled="_isConnecting || string.IsNullOrWhiteSpace(_connectionHost)"
+                                   Style="border-radius: 8px; text-transform: none; font-weight: 600; flex: 2;">
+                            @if (_isConnecting)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" Color="Color.Inherit" />
+                                <span>Connecting...</span>
+                            }
+                            else
+                            {
+                                <span>Connect</span>
+                            }
+                        </MudButton>
+                    </div>
                 </div>
             </MudPaper>
         </div>
@@ -1119,6 +1172,299 @@
     </DialogActions>
 </MudDialog>
 
+@* Stats Dialog *@
+<MudDialog @bind-Visible="_showStatsDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6"><MudIcon Icon="@Icons.Material.Filled.Analytics" Class="mr-2" />Key Statistics</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_isLoadingStats)
+        {
+            <div style="text-align: center; padding: 24px;">
+                <MudProgressCircular Indeterminate="true" />
+                <MudText Class="mt-2">Scanning keys...</MudText>
+            </div>
+        }
+        else if (_keyStats != null)
+        {
+            <MudSimpleTable Dense="true" Hover="true">
+                <thead><tr><th>Type</th><th>Count</th></tr></thead>
+                <tbody>
+                    @foreach (var stat in _keyStats.Where(s => s.Value.Count > 0))
+                    {
+                        <tr>
+                            <td><MudChip T="string" Size="Size.Small" Color="GetTypeColor(stat.Key)">@stat.Key</MudChip></td>
+                            <td>@stat.Value.Count.ToString("N0")</td>
+                        </tr>
+                    }
+                    <tr style="font-weight: bold;">
+                        <td>Total</td>
+                        <td>@_keyStats.Values.Sum(s => s.Count).ToString("N0")</td>
+                    </tr>
+                </tbody>
+            </MudSimpleTable>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showStatsDialog = false">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Slow Log Dialog *@
+<MudDialog @bind-Visible="_showSlowLogDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6"><MudIcon Icon="@Icons.Material.Filled.Speed" Class="mr-2" />Slow Log</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_isLoadingSlowLog)
+        {
+            <div style="text-align: center; padding: 24px;">
+                <MudProgressCircular Indeterminate="true" />
+            </div>
+        }
+        else if (_slowLogEntries.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">No slow queries recorded.</MudAlert>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Hover="true" Style="max-height: 400px; overflow-y: auto;">
+                <thead><tr><th>Time</th><th>Duration</th><th>Command</th></tr></thead>
+                <tbody>
+                    @foreach (var entry in _slowLogEntries)
+                    {
+                        <tr>
+                            <td style="white-space: nowrap;">@entry.Timestamp.ToString("HH:mm:ss")</td>
+                            <td><MudChip T="string" Size="Size.Small" Color="Color.Warning">@entry.Duration.TotalMilliseconds.ToString("F2") ms</MudChip></td>
+                            <td style="font-family: monospace; font-size: 12px; max-width: 400px; overflow: hidden; text-overflow: ellipsis;">@entry.Command</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="LoadSlowLog" StartIcon="@Icons.Material.Filled.Refresh">Refresh</MudButton>
+        <MudButton OnClick="() => _showSlowLogDialog = false">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Client List Dialog *@
+<MudDialog @bind-Visible="_showClientListDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6"><MudIcon Icon="@Icons.Material.Filled.People" Class="mr-2" />Connected Clients (@_clientList.Count)</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_isLoadingClients)
+        {
+            <div style="text-align: center; padding: 24px;">
+                <MudProgressCircular Indeterminate="true" />
+            </div>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Hover="true" Style="max-height: 400px; overflow-y: auto;">
+                <thead><tr><th>ID</th><th>Address</th><th>Name</th><th>DB</th><th>Age</th><th>Idle</th></tr></thead>
+                <tbody>
+                    @foreach (var client in _clientList)
+                    {
+                        <tr>
+                            <td>@client.Id</td>
+                            <td style="font-family: monospace;">@client.Address</td>
+                            <td>@(string.IsNullOrEmpty(client.Name) ? "-" : client.Name)</td>
+                            <td><MudChip T="string" Size="Size.Small">DB @client.Database</MudChip></td>
+                            <td>@TimeSpan.FromSeconds(client.AgeSeconds).ToString(@"hh\:mm\:ss")</td>
+                            <td>@TimeSpan.FromSeconds(client.IdleSeconds).ToString(@"hh\:mm\:ss")</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="LoadClientList" StartIcon="@Icons.Material.Filled.Refresh">Refresh</MudButton>
+        <MudButton OnClick="() => _showClientListDialog = false">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Pub/Sub Dialog *@
+<MudDialog @bind-Visible="_showPubSubDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6"><MudIcon Icon="@Icons.Material.Filled.Podcasts" Class="mr-2" />Pub/Sub Testing</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+            <MudTextField @bind-Value="_pubSubChannel" Label="Channel" Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1;" Disabled="_isSubscribed" />
+            @if (_isSubscribed)
+            {
+                <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="UnsubscribeFromChannel">Unsubscribe</MudButton>
+            }
+            else
+            {
+                <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SubscribeToChannel" Disabled="string.IsNullOrWhiteSpace(_pubSubChannel)">Subscribe</MudButton>
+            }
+        </div>
+        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+            <MudTextField @bind-Value="_pubSubMessage" Label="Message" Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1;" />
+            <MudButton Color="Color.Success" Variant="Variant.Filled" OnClick="PublishMessage" Disabled="string.IsNullOrWhiteSpace(_pubSubChannel) || string.IsNullOrWhiteSpace(_pubSubMessage)">Publish</MudButton>
+        </div>
+        <MudPaper Elevation="0" Style="max-height: 300px; overflow-y: auto; background: var(--mud-palette-background-gray); padding: 8px; border-radius: 8px;">
+            @if (_pubSubMessages.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Style="text-align: center; padding: 16px;">No messages yet</MudText>
+            }
+            else
+            {
+                @foreach (var msg in _pubSubMessages)
+                {
+                    <div style="margin-bottom: 8px; padding: 8px; background: var(--mud-palette-surface); border-radius: 4px; border-left: 3px solid @(msg.IsSent ? "var(--mud-palette-success)" : "var(--mud-palette-info)");">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                            <MudChip T="string" Size="Size.Small" Color="@(msg.IsSent ? Color.Success : Color.Info)">@(msg.IsSent ? "SENT" : "RECEIVED")</MudChip>
+                            <MudText Typo="Typo.caption">@msg.Timestamp.ToString("HH:mm:ss")</MudText>
+                        </div>
+                        <MudText Typo="Typo.body2" Style="font-family: monospace; word-break: break-all;">@msg.Message</MudText>
+                    </div>
+                }
+            }
+        </MudPaper>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => { _pubSubMessages.Clear(); }">Clear</MudButton>
+        <MudButton OnClick="() => _showPubSubDialog = false">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Bulk TTL Dialog *@
+<MudDialog @bind-Visible="_showBulkTtlDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Small }">
+    <TitleContent>
+        <MudText Typo="Typo.h6"><MudIcon Icon="@Icons.Material.Filled.Timer" Class="mr-2" />Set TTL on @_selectedKeys.Count keys</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="display: flex; gap: 12px;">
+            <MudNumericField @bind-Value="_bulkTtlValue" Label="Value" Variant="Variant.Outlined" Min="1" Style="flex: 1;" />
+            <MudSelect @bind-Value="_bulkTtlUnit" Label="Unit" Variant="Variant.Outlined" Style="flex: 1;">
+                <MudSelectItem Value="@("seconds")">Seconds</MudSelectItem>
+                <MudSelectItem Value="@("minutes")">Minutes</MudSelectItem>
+                <MudSelectItem Value="@("hours")">Hours</MudSelectItem>
+                <MudSelectItem Value="@("days")">Days</MudSelectItem>
+            </MudSelect>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showBulkTtlDialog = false">Cancel</MudButton>
+        <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="RemoveBulkTtl" Disabled="_isSettingBulkTtl">Remove TTL</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SetBulkTtl" Disabled="_isSettingBulkTtl">
+            @if (_isSettingBulkTtl) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            Set TTL
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Compare Keys Dialog *@
+<MudDialog @bind-Visible="_showCompareDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6"><MudIcon Icon="@Icons.Material.Filled.Compare" Class="mr-2" />Compare Keys</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+            <MudTextField @bind-Value="_compareKey1" Label="Key 1" Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1;" />
+            <MudTextField @bind-Value="_compareKey2" Label="Key 2" Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1;" />
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="CompareKeys" Disabled="_isLoadingComparison">Compare</MudButton>
+        </div>
+        @if (_isLoadingComparison)
+        {
+            <div style="text-align: center; padding: 24px;">
+                <MudProgressCircular Indeterminate="true" />
+            </div>
+        }
+        else if (_compareValue1 != null && _compareValue2 != null)
+        {
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <MudPaper Elevation="1" Class="pa-3">
+                    <MudText Typo="Typo.subtitle2" Color="Color.Primary">@_compareKey1 (@_compareValue1.Type)</MudText>
+                    <pre style="font-size: 12px; max-height: 300px; overflow: auto; margin: 0;">@FormatValueForDisplay(_compareValue1)</pre>
+                </MudPaper>
+                <MudPaper Elevation="1" Class="pa-3">
+                    <MudText Typo="Typo.subtitle2" Color="Color.Secondary">@_compareKey2 (@_compareValue2.Type)</MudText>
+                    <pre style="font-size: 12px; max-height: 300px; overflow: auto; margin: 0;">@FormatValueForDisplay(_compareValue2)</pre>
+                </MudPaper>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => { _showCompareDialog = false; _compareValue1 = null; _compareValue2 = null; }">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Connection Profiles Dialog *@
+<MudDialog @bind-Visible="_showProfilesDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6"><MudIcon Icon="@Icons.Material.Filled.AccountCircle" Class="mr-2" />Connection Profiles</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+            <MudTextField @bind-Value="_newProfileName" Label="Profile Name" Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1;" />
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveCurrentAsProfile" Disabled="string.IsNullOrWhiteSpace(_newProfileName)">Save Current</MudButton>
+        </div>
+        @if (_connectionProfiles.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">No saved profiles. Enter your connection details and save them as a profile.</MudAlert>
+        }
+        else
+        {
+            @foreach (var profile in _connectionProfiles)
+            {
+                <MudPaper Elevation="1" Class="pa-3 mb-2" Style="display: flex; align-items: center; justify-content: space-between;">
+                    <div>
+                        <MudText Typo="Typo.subtitle2">@profile.Name</MudText>
+                        <MudText Typo="Typo.caption">@profile.Host:@profile.Port (DB @profile.DefaultDatabase)</MudText>
+                    </div>
+                    <div>
+                        <MudIconButton Icon="@Icons.Material.Filled.Login" Size="Size.Small" Color="Color.Primary" OnClick="() => LoadProfile(profile)" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteProfile(profile)" />
+                    </div>
+                </MudPaper>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showProfilesDialog = false">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Console Drawer *@
+<MudDrawer @bind-Open="_showConsoleDrawer" Anchor="Anchor.Bottom" Elevation="4" Variant="DrawerVariant.Temporary" Height="400px">
+    <div style="display: flex; flex-direction: column; height: 100%; padding: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <MudText Typo="Typo.h6"><MudIcon Icon="@Icons.Material.Filled.Terminal" Class="mr-2" />Redis Console</MudText>
+            <div>
+                <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep" Size="Size.Small" OnClick="ClearConsole" />
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="() => _showConsoleDrawer = false" />
+            </div>
+        </div>
+        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+            <MudTextField @bind-Value="_consoleCommand" Label="Command" Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1; font-family: monospace;"
+                          Placeholder="GET mykey, SET foo bar, KEYS *..." OnKeyDown="@(async (e) => { if (e.Key == "Enter") await ExecuteConsoleCommand(); })" />
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ExecuteConsoleCommand" Disabled="_isExecutingCommand">
+                @if (_isExecutingCommand) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> } else { <text>Execute</text> }
+            </MudButton>
+        </div>
+        <MudPaper Elevation="0" Style="flex: 1; overflow-y: auto; background: #1e1e2d; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 13px;">
+            @foreach (var entry in _consoleHistory)
+            {
+                <div style="margin-bottom: 12px;">
+                    <div style="color: #90caf9;">&gt; @entry.Command</div>
+                    <div style="color: @(entry.IsError ? "#f44336" : "#66bb6a"); white-space: pre-wrap; margin-left: 16px;">@entry.Result</div>
+                </div>
+            }
+            @if (_consoleHistory.Count == 0)
+            {
+                <div style="color: #666; text-align: center;">Type a Redis command and press Enter or click Execute</div>
+            }
+        </MudPaper>
+    </div>
+</MudDrawer>
+
 <footer style="position: fixed; bottom: 0; left: 0; right: 0; padding: 8px 16px; background: linear-gradient(90deg, #1a1a2e 0%, #16213e 100%); text-align: center; z-index: 1000;">
     <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.7);">
         Developed by <a href="https://github.com/0xZunia/" target="_blank" style="color: #e94560; font-weight: bold; text-decoration: none;">Reyan CARLIER</a>
@@ -1130,6 +1476,32 @@
         background: var(--mud-palette-action-default-hover) !important;
     }
 </style>
+
+@* Keyboard Shortcuts Help *@
+<MudFab StartIcon="@Icons.Material.Filled.Keyboard" Color="Color.Default" Size="Size.Small"
+        Style="position: fixed; bottom: 60px; right: 16px; z-index: 999;"
+        OnClick="() => _showKeyboardShortcutsDialog = true" />
+
+@* Keyboard Shortcuts Dialog *@
+<MudDialog @bind-Visible="_showKeyboardShortcutsDialog" Options="new DialogOptions { MaxWidth = MaxWidth.Small }">
+    <TitleContent>
+        <MudText Typo="Typo.h6"><MudIcon Icon="@Icons.Material.Filled.Keyboard" Class="mr-2" />Keyboard Shortcuts</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudSimpleTable Dense="true" Hover="true" Style="background: transparent;">
+            <tbody>
+                <tr><td><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Ctrl + N</MudChip></td><td>Create new key</td></tr>
+                <tr><td><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Ctrl + R</MudChip></td><td>Refresh keys</td></tr>
+                <tr><td><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Ctrl + `</MudChip></td><td>Toggle Redis console</td></tr>
+                <tr><td><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Delete</MudChip></td><td>Delete selected key</td></tr>
+                <tr><td><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Escape</MudChip></td><td>Close dialogs</td></tr>
+            </tbody>
+        </MudSimpleTable>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showKeyboardShortcutsDialog = false">Close</MudButton>
+    </DialogActions>
+</MudDialog>
 
 @code {
     private readonly MudTheme _theme = new()
@@ -1278,7 +1650,212 @@
     private string _connectionPassword = "";
     private bool _showPassword;
 
-    private void ToggleTheme() => _isDarkMode = !_isDarkMode;
+    // Database selection
+    private int _selectedDatabase;
+    private Dictionary<int, long>? _databaseSizes;
+
+    // Redis Console
+    private bool _showConsoleDrawer;
+    private string _consoleCommand = "";
+    private List<ConsoleEntry> _consoleHistory = new();
+    private bool _isExecutingCommand;
+
+    // Stats & Monitoring
+    private bool _showStatsDialog;
+    private Dictionary<string, KeyTypeStats>? _keyStats;
+    private bool _isLoadingStats;
+
+    // Slow Log
+    private bool _showSlowLogDialog;
+    private List<SlowLogEntry> _slowLogEntries = new();
+    private bool _isLoadingSlowLog;
+
+    // Client List
+    private bool _showClientListDialog;
+    private List<RedisClientInfo> _clientList = new();
+    private bool _isLoadingClients;
+
+    // Favorites
+    private HashSet<string> _favoriteKeys = new();
+    private bool _showFavoritesOnly;
+
+    // Connection Profiles
+    private List<ConnectionProfile> _connectionProfiles = new();
+    private bool _showProfilesDialog;
+    private string _newProfileName = "";
+
+    // Pub/Sub
+    private bool _showPubSubDialog;
+    private string _pubSubChannel = "";
+    private string _pubSubMessage = "";
+    private List<PubSubEntry> _pubSubMessages = new();
+    private bool _isSubscribed;
+    private StackExchange.Redis.ISubscriber? _subscriber;
+    private StackExchange.Redis.ChannelMessageQueue? _messageQueue;
+
+    // Bulk TTL
+    private bool _showBulkTtlDialog;
+    private int _bulkTtlValue = 3600;
+    private string _bulkTtlUnit = "seconds";
+    private bool _isSettingBulkTtl;
+
+    // Key Comparison
+    private bool _showCompareDialog;
+    private string _compareKey1 = "";
+    private string _compareKey2 = "";
+    private RedisValueResult? _compareValue1;
+    private RedisValueResult? _compareValue2;
+    private bool _isLoadingComparison;
+
+    // Key Memory
+    private long _selectedKeyMemory;
+
+    // Keyboard Shortcuts Dialog
+    private bool _showKeyboardShortcutsDialog;
+
+    // Classes for UI
+    public class ConsoleEntry
+    {
+        public string Command { get; set; } = "";
+        public string Result { get; set; } = "";
+        public DateTime Timestamp { get; set; } = DateTime.Now;
+        public bool IsError { get; set; }
+    }
+
+    public class PubSubEntry
+    {
+        public string Channel { get; set; } = "";
+        public string Message { get; set; } = "";
+        public DateTime Timestamp { get; set; } = DateTime.Now;
+        public bool IsSent { get; set; }
+    }
+
+    private void ToggleTheme()
+    {
+        _isDarkMode = !_isDarkMode;
+        _ = SaveThemePreference();
+    }
+
+    private async Task SaveThemePreference()
+    {
+        try { await JS.InvokeVoidAsync("localStorage.setItem", "redisviewer_theme", _isDarkMode ? "dark" : "light"); } catch { }
+    }
+
+    private async Task LoadThemePreference()
+    {
+        try
+        {
+            var theme = await JS.InvokeAsync<string>("localStorage.getItem", "redisviewer_theme");
+            _isDarkMode = theme != "light";
+        }
+        catch { }
+    }
+
+    private async Task LoadFavorites()
+    {
+        try
+        {
+            var json = await JS.InvokeAsync<string>("localStorage.getItem", "redisviewer_favorites");
+            if (!string.IsNullOrEmpty(json))
+                _favoriteKeys = JsonSerializer.Deserialize<HashSet<string>>(json) ?? new();
+        }
+        catch { }
+    }
+
+    private async Task SaveFavorites()
+    {
+        try { await JS.InvokeVoidAsync("localStorage.setItem", "redisviewer_favorites", JsonSerializer.Serialize(_favoriteKeys)); } catch { }
+    }
+
+    private async Task LoadConnectionProfiles()
+    {
+        try
+        {
+            var json = await JS.InvokeAsync<string>("localStorage.getItem", "redisviewer_profiles");
+            if (!string.IsNullOrEmpty(json))
+                _connectionProfiles = JsonSerializer.Deserialize<List<ConnectionProfile>>(json) ?? new();
+        }
+        catch { }
+    }
+
+    private async Task SaveConnectionProfiles()
+    {
+        try { await JS.InvokeVoidAsync("localStorage.setItem", "redisviewer_profiles", JsonSerializer.Serialize(_connectionProfiles)); } catch { }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadThemePreference();
+            await LoadFavorites();
+            await LoadConnectionProfiles();
+            await SetupKeyboardShortcuts();
+            StateHasChanged();
+        }
+    }
+
+    private async Task SetupKeyboardShortcuts()
+    {
+        try
+        {
+            var dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("eval", @"
+                window.redisViewerKeyHandler = (dotNetRef) => {
+                    document.addEventListener('keydown', async (e) => {
+                        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+                        if (e.ctrlKey && e.key === 'n') {
+                            e.preventDefault();
+                            await dotNetRef.invokeMethodAsync('HandleKeyboardShortcut', 'new');
+                        } else if (e.ctrlKey && e.key === 'r') {
+                            e.preventDefault();
+                            await dotNetRef.invokeMethodAsync('HandleKeyboardShortcut', 'refresh');
+                        } else if (e.ctrlKey && e.key === '`') {
+                            e.preventDefault();
+                            await dotNetRef.invokeMethodAsync('HandleKeyboardShortcut', 'console');
+                        } else if (e.key === 'Delete' && !e.ctrlKey) {
+                            await dotNetRef.invokeMethodAsync('HandleKeyboardShortcut', 'delete');
+                        } else if (e.key === 'Escape') {
+                            await dotNetRef.invokeMethodAsync('HandleKeyboardShortcut', 'escape');
+                        }
+                    });
+                };
+                window.redisViewerKeyHandler(DotNet.createJSObjectReference(arguments[0]));
+            ");
+        }
+        catch { }
+    }
+
+    [JSInvokable]
+    public async Task HandleKeyboardShortcut(string action)
+    {
+        switch (action)
+        {
+            case "new":
+                if (Redis.IsConnected) OpenCreateKeyDialog();
+                break;
+            case "refresh":
+                if (Redis.IsConnected) await RefreshKeys();
+                break;
+            case "console":
+                if (Redis.IsConnected) _showConsoleDrawer = !_showConsoleDrawer;
+                break;
+            case "delete":
+                if (Redis.IsConnected && _selectedKey != null) RequestDeleteSelectedKey();
+                break;
+            case "escape":
+                _showConsoleDrawer = false;
+                _showStatsDialog = false;
+                _showSlowLogDialog = false;
+                _showClientListDialog = false;
+                _showPubSubDialog = false;
+                _showCompareDialog = false;
+                _showKeyboardShortcutsDialog = false;
+                break;
+        }
+        StateHasChanged();
+    }
 
     private async Task Connect()
     {
@@ -1574,6 +2151,87 @@
         {
             return value;
         }
+    }
+
+    private string FormatJsonWithHighlighting(string? value)
+    {
+        var formatted = FormatJson(value);
+        if (string.IsNullOrEmpty(formatted)) return formatted;
+
+        var result = new System.Text.StringBuilder();
+        var inString = false;
+        var isKey = false;
+        var i = 0;
+
+        while (i < formatted.Length)
+        {
+            var c = formatted[i];
+
+            if (c == '"' && (i == 0 || formatted[i - 1] != '\\'))
+            {
+                if (!inString)
+                {
+                    inString = true;
+                    // Check if this is a key (followed by content then :)
+                    var lookAhead = formatted.IndexOf('"', i + 1);
+                    if (lookAhead > 0)
+                    {
+                        var afterQuote = formatted.Substring(lookAhead + 1).TrimStart();
+                        isKey = afterQuote.StartsWith(":");
+                    }
+                    var color = isKey ? "#9cdcfe" : "#ce9178";
+                    result.Append($"<span style=\"color:{color};\">\"");
+                }
+                else
+                {
+                    result.Append("\"</span>");
+                    inString = false;
+                    isKey = false;
+                }
+            }
+            else if (!inString)
+            {
+                if (c == ':')
+                    result.Append("<span style=\"color:#d4d4d4;\">:</span>");
+                else if (c == '{' || c == '}')
+                    result.Append($"<span style=\"color:#ffd700;\">{c}</span>");
+                else if (c == '[' || c == ']')
+                    result.Append($"<span style=\"color:#da70d6;\">{c}</span>");
+                else if (c == ',' )
+                    result.Append("<span style=\"color:#d4d4d4;\">,</span>");
+                else if (char.IsDigit(c) || c == '-' || c == '.')
+                {
+                    var numStart = i;
+                    while (i < formatted.Length && (char.IsDigit(formatted[i]) || formatted[i] == '.' || formatted[i] == '-' || formatted[i] == 'e' || formatted[i] == 'E' || formatted[i] == '+'))
+                        i++;
+                    result.Append($"<span style=\"color:#b5cea8;\">{System.Web.HttpUtility.HtmlEncode(formatted.Substring(numStart, i - numStart))}</span>");
+                    continue;
+                }
+                else if (formatted.Substring(i).StartsWith("true") || formatted.Substring(i).StartsWith("false"))
+                {
+                    var word = formatted.Substring(i).StartsWith("true") ? "true" : "false";
+                    result.Append($"<span style=\"color:#569cd6;\">{word}</span>");
+                    i += word.Length;
+                    continue;
+                }
+                else if (formatted.Substring(i).StartsWith("null"))
+                {
+                    result.Append("<span style=\"color:#569cd6;\">null</span>");
+                    i += 4;
+                    continue;
+                }
+                else
+                    result.Append(c);
+            }
+            else
+            {
+                // Inside string - escape HTML
+                result.Append(System.Web.HttpUtility.HtmlEncode(c.ToString()));
+            }
+            i++;
+        }
+
+        return result.ToString();
     }
 
     // String editing methods
@@ -2380,12 +3038,383 @@
         _currentPage = 1;
     }
 
+    // Database selection
+    private async Task ChangeDatabase(int dbIndex)
+    {
+        _selectedDatabase = dbIndex;
+        Redis.SelectDatabase(dbIndex);
+        await RefreshKeys();
+    }
+
+    private async Task LoadDatabaseSizes()
+    {
+        try { _databaseSizes = await Redis.GetAllDatabaseSizesAsync(); } catch { }
+    }
+
+    // Copy to clipboard
+    private async Task CopyToClipboard(string text)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Snackbar.Add("Copied to clipboard", Severity.Info);
+        }
+        catch { Snackbar.Add("Failed to copy", Severity.Error); }
+    }
+
+    // Redis Console
+    private async Task ExecuteConsoleCommand()
+    {
+        if (string.IsNullOrWhiteSpace(_consoleCommand)) return;
+
+        _isExecutingCommand = true;
+        StateHasChanged();
+
+        var entry = new ConsoleEntry { Command = _consoleCommand };
+
+        try
+        {
+            entry.Result = await Redis.ExecuteCommandAsync(_consoleCommand);
+            entry.IsError = entry.Result.StartsWith("ERROR");
+        }
+        catch (Exception ex)
+        {
+            entry.Result = $"ERROR: {ex.Message}";
+            entry.IsError = true;
+        }
+
+        _consoleHistory.Insert(0, entry);
+        if (_consoleHistory.Count > 100) _consoleHistory.RemoveAt(_consoleHistory.Count - 1);
+        _consoleCommand = "";
+        _isExecutingCommand = false;
+    }
+
+    private void ClearConsole() => _consoleHistory.Clear();
+
+    // Stats
+    private async Task LoadStats()
+    {
+        _showStatsDialog = true;
+        _isLoadingStats = true;
+        StateHasChanged();
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            _keyStats = await Redis.GetKeyStatsByTypeAsync(cts.Token);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error loading stats: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isLoadingStats = false;
+        }
+    }
+
+    // Slow Log
+    private async Task LoadSlowLog()
+    {
+        _showSlowLogDialog = true;
+        _isLoadingSlowLog = true;
+        StateHasChanged();
+
+        try
+        {
+            _slowLogEntries = await Redis.GetSlowLogAsync(50);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isLoadingSlowLog = false;
+        }
+    }
+
+    // Client List
+    private async Task LoadClientList()
+    {
+        _showClientListDialog = true;
+        _isLoadingClients = true;
+        StateHasChanged();
+
+        try
+        {
+            _clientList = await Redis.GetClientListAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isLoadingClients = false;
+        }
+    }
+
+    // Favorites
+    private async Task ToggleFavorite(string key)
+    {
+        if (_favoriteKeys.Contains(key))
+            _favoriteKeys.Remove(key);
+        else
+            _favoriteKeys.Add(key);
+        await SaveFavorites();
+    }
+
+    private bool IsFavorite(string key) => _favoriteKeys.Contains(key);
+
+    // Connection Profiles
+    private async Task SaveCurrentAsProfile()
+    {
+        if (string.IsNullOrWhiteSpace(_newProfileName)) return;
+
+        var profile = new ConnectionProfile
+        {
+            Name = _newProfileName,
+            Host = _connectionHost,
+            Port = _connectionPort,
+            Password = string.IsNullOrWhiteSpace(_connectionPassword) ? null : _connectionPassword,
+            DefaultDatabase = _selectedDatabase
+        };
+        _connectionProfiles.Add(profile);
+        await SaveConnectionProfiles();
+        _newProfileName = "";
+        Snackbar.Add("Profile saved", Severity.Success);
+    }
+
+    private async Task LoadProfile(ConnectionProfile profile)
+    {
+        _connectionHost = profile.Host;
+        _connectionPort = profile.Port;
+        _connectionPassword = profile.Password ?? "";
+        _selectedDatabase = profile.DefaultDatabase;
+        _showProfilesDialog = false;
+
+        if (Redis.IsConnected)
+            await Disconnect();
+        await Connect();
+    }
+
+    private async Task DeleteProfile(ConnectionProfile profile)
+    {
+        _connectionProfiles.Remove(profile);
+        await SaveConnectionProfiles();
+    }
+
+    // Pub/Sub
+    private async Task SubscribeToChannel()
+    {
+        if (string.IsNullOrWhiteSpace(_pubSubChannel) || _isSubscribed) return;
+
+        try
+        {
+            _subscriber = Redis.GetSubscriber();
+            _messageQueue = await _subscriber.SubscribeAsync(StackExchange.Redis.RedisChannel.Literal(_pubSubChannel));
+            _isSubscribed = true;
+
+            _ = Task.Run(async () =>
+            {
+                await foreach (var message in _messageQueue)
+                {
+                    await InvokeAsync(() =>
+                    {
+                        _pubSubMessages.Insert(0, new PubSubEntry
+                        {
+                            Channel = _pubSubChannel,
+                            Message = message.Message.ToString(),
+                            IsSent = false
+                        });
+                        if (_pubSubMessages.Count > 100) _pubSubMessages.RemoveAt(_pubSubMessages.Count - 1);
+                        StateHasChanged();
+                    });
+                }
+            });
+
+            Snackbar.Add($"Subscribed to {_pubSubChannel}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task UnsubscribeFromChannel()
+    {
+        if (!_isSubscribed || _subscriber == null) return;
+
+        try
+        {
+            await _subscriber.UnsubscribeAsync(StackExchange.Redis.RedisChannel.Literal(_pubSubChannel));
+            _isSubscribed = false;
+            Snackbar.Add("Unsubscribed", Severity.Info);
+        }
+        catch { }
+    }
+
+    private async Task PublishMessage()
+    {
+        if (string.IsNullOrWhiteSpace(_pubSubChannel) || string.IsNullOrWhiteSpace(_pubSubMessage)) return;
+
+        try
+        {
+            var count = await Redis.PublishAsync(_pubSubChannel, _pubSubMessage);
+            _pubSubMessages.Insert(0, new PubSubEntry
+            {
+                Channel = _pubSubChannel,
+                Message = _pubSubMessage,
+                IsSent = true
+            });
+            _pubSubMessage = "";
+            Snackbar.Add($"Published to {count} subscribers", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // Bulk TTL
+    private void OpenBulkTtlDialog()
+    {
+        if (_selectedKeys.Count == 0)
+        {
+            Snackbar.Add("Select keys first", Severity.Warning);
+            return;
+        }
+        _showBulkTtlDialog = true;
+    }
+
+    private async Task SetBulkTtl()
+    {
+        if (_selectedKeys.Count == 0) return;
+
+        _isSettingBulkTtl = true;
+        StateHasChanged();
+
+        try
+        {
+            var expiry = _bulkTtlUnit switch
+            {
+                "minutes" => TimeSpan.FromMinutes(_bulkTtlValue),
+                "hours" => TimeSpan.FromHours(_bulkTtlValue),
+                "days" => TimeSpan.FromDays(_bulkTtlValue),
+                _ => TimeSpan.FromSeconds(_bulkTtlValue)
+            };
+
+            var count = await Redis.SetBulkTtlAsync(_selectedKeys, expiry);
+            _showBulkTtlDialog = false;
+            Snackbar.Add($"TTL set on {count} keys", Severity.Success);
+            await RefreshKeys();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSettingBulkTtl = false;
+        }
+    }
+
+    private async Task RemoveBulkTtl()
+    {
+        if (_selectedKeys.Count == 0) return;
+
+        _isSettingBulkTtl = true;
+        StateHasChanged();
+
+        try
+        {
+            var count = await Redis.SetBulkTtlAsync(_selectedKeys, null);
+            _showBulkTtlDialog = false;
+            Snackbar.Add($"TTL removed from {count} keys", Severity.Success);
+            await RefreshKeys();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSettingBulkTtl = false;
+        }
+    }
+
+    // Key Comparison
+    private async Task CompareKeys()
+    {
+        if (string.IsNullOrWhiteSpace(_compareKey1) || string.IsNullOrWhiteSpace(_compareKey2)) return;
+
+        _isLoadingComparison = true;
+        StateHasChanged();
+
+        try
+        {
+            _compareValue1 = await Redis.GetValueAsync(_compareKey1);
+            _compareValue2 = await Redis.GetValueAsync(_compareKey2);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isLoadingComparison = false;
+        }
+    }
+
+    // Key Memory
+    private async Task LoadKeyMemory()
+    {
+        if (_selectedKey == null) return;
+        try
+        {
+            _selectedKeyMemory = await Redis.GetKeyMemoryUsageAsync(_selectedKey.Key);
+        }
+        catch { _selectedKeyMemory = 0; }
+    }
+
+    private string FormatBytes(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB"];
+        int order = 0;
+        double size = bytes;
+        while (size >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            size /= 1024;
+        }
+        return $"{size:0.##} {sizes[order]}";
+    }
+
+    private string FormatValueForDisplay(RedisValueResult? value)
+    {
+        if (value == null) return "(null)";
+        return value.Type switch
+        {
+            "String" => value.Value ?? "(null)",
+            "List" => value.ListValue != null ? string.Join("\n", value.ListValue.Select((v, i) => $"{i}: {v}")) : "(empty)",
+            "Set" => value.SetValue != null ? string.Join("\n", value.SetValue) : "(empty)",
+            "SortedSet" => value.SortedSetValue != null ? string.Join("\n", value.SortedSetValue.Select(e => $"{e.Score}: {e.Member}")) : "(empty)",
+            "Hash" => value.HashValue != null ? string.Join("\n", value.HashValue.Select(kv => $"{kv.Key}: {kv.Value}")) : "(empty)",
+            _ => value.Value ?? "(unknown type)"
+        };
+    }
+
     public void Dispose()
     {
         try
         {
             _streamCts?.Cancel();
             _streamCts?.Dispose();
+            if (_isSubscribed && _subscriber != null)
+            {
+                _ = _subscriber.UnsubscribeAllAsync();
+            }
         }
         catch { }
         _keys = [];

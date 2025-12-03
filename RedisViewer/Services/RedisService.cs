@@ -7,10 +7,13 @@ public class RedisService : IDisposable
 {
     private ConnectionMultiplexer? _connection;
     private string? _currentConnectionString;
+    private int _selectedDatabase;
 
     public bool IsConnected => _connection?.IsConnected ?? false;
     public string? CurrentHost { get; private set; }
     public int? CurrentPort { get; private set; }
+    public int SelectedDatabase => _selectedDatabase;
+    public int DatabaseCount => 16; // Redis default
 
     public async Task<bool> ConnectAsync(string host, int port, string? password = null)
     {
@@ -60,7 +63,7 @@ public class RedisService : IDisposable
         _currentConnectionString = null;
     }
 
-    private IDatabase GetDatabase() => _connection?.GetDatabase()
+    private IDatabase GetDatabase() => _connection?.GetDatabase(_selectedDatabase)
         ?? throw new InvalidOperationException("Not connected to Redis");
 
     private IServer GetServer()
@@ -70,6 +73,172 @@ public class RedisService : IDisposable
 
         var endpoint = _connection.GetEndPoints().First();
         return _connection.GetServer(endpoint);
+    }
+
+    public void SelectDatabase(int dbIndex)
+    {
+        if (dbIndex < 0 || dbIndex >= DatabaseCount)
+            throw new ArgumentOutOfRangeException(nameof(dbIndex));
+        _selectedDatabase = dbIndex;
+    }
+
+    // Execute raw Redis command
+    public async Task<string> ExecuteCommandAsync(string command)
+    {
+        var db = GetDatabase();
+        var parts = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return "Empty command";
+
+        try
+        {
+            var result = await db.ExecuteAsync(parts[0], parts.Skip(1).Cast<object>().ToArray());
+            return FormatRedisResult(result);
+        }
+        catch (Exception ex)
+        {
+            return $"ERROR: {ex.Message}";
+        }
+    }
+
+    private string FormatRedisResult(RedisResult result)
+    {
+        if (result.IsNull) return "(nil)";
+        if (result.Resp3Type == ResultType.Array || result.Resp3Type == ResultType.Set)
+        {
+            var items = (RedisResult[])result!;
+            if (items.Length == 0) return "(empty array)";
+            return string.Join("\n", items.Select((item, i) => $"{i + 1}) {FormatRedisResult(item)}"));
+        }
+        return result.ToString() ?? "(nil)";
+    }
+
+    // Get slow log
+    public async Task<List<SlowLogEntry>> GetSlowLogAsync(int count = 20)
+    {
+        var server = GetServer();
+        var entries = await server.SlowlogGetAsync(count);
+        return entries.Select(e => new SlowLogEntry
+        {
+            Id = e.UniqueId,
+            Timestamp = e.Time,
+            Duration = e.Duration,
+            Command = string.Join(" ", e.Arguments?.Select(a => a.ToString()) ?? Array.Empty<string>())
+        }).ToList();
+    }
+
+    // Get client list
+    public async Task<List<RedisClientInfo>> GetClientListAsync()
+    {
+        var server = GetServer();
+        var clients = await server.ClientListAsync();
+        return clients.Select(c => new RedisClientInfo
+        {
+            Id = c.Id,
+            Address = c.Address?.ToString() ?? "",
+            Name = c.Name ?? "",
+            AgeSeconds = (int)c.AgeSeconds,
+            IdleSeconds = (int)c.IdleSeconds,
+            Database = c.Database,
+            Flags = c.FlagsRaw ?? ""
+        }).ToList();
+    }
+
+    // Get key statistics by type
+    public async Task<Dictionary<string, KeyTypeStats>> GetKeyStatsByTypeAsync(CancellationToken cancellationToken = default)
+    {
+        var server = GetServer();
+        var db = GetDatabase();
+        var stats = new Dictionary<string, KeyTypeStats>
+        {
+            ["String"] = new KeyTypeStats(),
+            ["List"] = new KeyTypeStats(),
+            ["Set"] = new KeyTypeStats(),
+            ["SortedSet"] = new KeyTypeStats(),
+            ["Hash"] = new KeyTypeStats(),
+            ["Stream"] = new KeyTypeStats(),
+            ["Other"] = new KeyTypeStats()
+        };
+
+        await foreach (var key in server.KeysAsync(database: _selectedDatabase, pattern: "*").WithCancellation(cancellationToken))
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+
+            var type = await db.KeyTypeAsync(key);
+            var typeName = type.ToString();
+            if (!stats.ContainsKey(typeName)) typeName = "Other";
+
+            stats[typeName].Count++;
+        }
+
+        return stats;
+    }
+
+    // Get memory usage for a key
+    public async Task<long> GetKeyMemoryUsageAsync(string key)
+    {
+        var db = GetDatabase();
+        try
+        {
+            var result = await db.ExecuteAsync("MEMORY", "USAGE", key);
+            return result.IsNull ? 0 : (long)result;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    // Bulk set TTL on multiple keys
+    public async Task<int> SetBulkTtlAsync(IEnumerable<string> keys, TimeSpan? expiry)
+    {
+        var db = GetDatabase();
+        int count = 0;
+        foreach (var key in keys)
+        {
+            bool success;
+            if (expiry == null)
+                success = await db.KeyPersistAsync(key);
+            else
+                success = await db.KeyExpireAsync(key, expiry);
+            if (success) count++;
+        }
+        return count;
+    }
+
+    // Subscribe to a Pub/Sub channel
+    public ISubscriber GetSubscriber()
+    {
+        if (_connection == null)
+            throw new InvalidOperationException("Not connected to Redis");
+        return _connection.GetSubscriber();
+    }
+
+    // Publish a message
+    public async Task<long> PublishAsync(string channel, string message)
+    {
+        var subscriber = GetSubscriber();
+        return await subscriber.PublishAsync(RedisChannel.Literal(channel), message);
+    }
+
+    // Get database info (size per DB)
+    public async Task<Dictionary<int, long>> GetAllDatabaseSizesAsync()
+    {
+        var server = GetServer();
+        var sizes = new Dictionary<int, long>();
+
+        for (int i = 0; i < DatabaseCount; i++)
+        {
+            try
+            {
+                var size = await server.DatabaseSizeAsync(i);
+                sizes[i] = size;
+            }
+            catch
+            {
+                sizes[i] = 0;
+            }
+        }
+        return sizes;
     }
 
     public async IAsyncEnumerable<RedisKeyInfo> StreamKeysAsync(
@@ -563,4 +732,47 @@ public class ConnectionHistory
     public int Port { get; set; }
     public DateTime LastUsed { get; set; }
     public string? Name { get; set; }
+}
+
+public class SlowLogEntry
+{
+    public long Id { get; set; }
+    public DateTime Timestamp { get; set; }
+    public TimeSpan Duration { get; set; }
+    public string Command { get; set; } = string.Empty;
+}
+
+public class RedisClientInfo
+{
+    public long Id { get; set; }
+    public string Address { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public int AgeSeconds { get; set; }
+    public int IdleSeconds { get; set; }
+    public int Database { get; set; }
+    public string Flags { get; set; } = string.Empty;
+}
+
+public class KeyTypeStats
+{
+    public int Count { get; set; }
+    public long TotalMemory { get; set; }
+}
+
+public class ConnectionProfile
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string Name { get; set; } = string.Empty;
+    public string Host { get; set; } = "localhost";
+    public int Port { get; set; } = 6379;
+    public string? Password { get; set; }
+    public int DefaultDatabase { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+}
+
+public class FavoriteKey
+{
+    public string Key { get; set; } = string.Empty;
+    public string? Alias { get; set; }
+    public DateTime AddedAt { get; set; } = DateTime.Now;
 }
